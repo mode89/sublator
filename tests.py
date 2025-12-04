@@ -1,10 +1,15 @@
-import pytest
+"""
+Test suite for the sublator subtitle translation module.
+
+This module contains comprehensive tests for SRT parsing, formatting,
+translation, and API interaction functionality.
+"""
+
 import json
 from unittest.mock import patch, Mock, MagicMock
-from io import BytesIO
 from urllib.error import URLError
-import sys
-import os
+
+import pytest  # pylint: disable=import-error
 
 # Import functions from sublator
 from sublator import parse_srt, format_srt, translate_batch, invoke_model
@@ -25,8 +30,12 @@ Second subtitle"""
     entries = parse_srt(srt_content)
 
     assert len(entries) == 2
-    assert entries[0] == ("1", "00:00:01,000 --> 00:00:02,000", "Hello World")
-    assert entries[1] == ("2", "00:00:03,000 --> 00:00:04,000", "Second subtitle")
+    assert entries[0] == (
+        "1", "00:00:01,000 --> 00:00:02,000", "Hello World"
+    )
+    assert entries[1] == (
+        "2", "00:00:03,000 --> 00:00:04,000", "Second subtitle"
+    )
 
 
 def test_parse_multi_line_subtitles():
@@ -158,18 +167,24 @@ def test_format_empty_list():
 def test_batch_size_calculations():
     """Test batch size calculations."""
     # Test with exactly 100 entries
-    entries = [(str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
-               for i in range(100)]
+    entries = [
+        (str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
+        for i in range(100)
+    ]
     assert len(entries) == 100
 
     # Test with less than batch size
-    entries = [(str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
-               for i in range(50)]
+    entries = [
+        (str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
+        for i in range(50)
+    ]
     assert len(entries) == 50
 
     # Test with more than batch size
-    entries = [(str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
-               for i in range(250)]
+    entries = [
+        (str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
+        for i in range(250)
+    ]
     assert len(entries) == 250
 
     # Calculate number of batches needed
@@ -309,7 +324,10 @@ def test_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
     """Test that RuntimeError is raised after max retries."""
     mock_urlopen.side_effect = URLError("Connection error")
 
-    with pytest.raises(RuntimeError, match="Failed to get response from model after 5 tries"):
+    with pytest.raises(
+        RuntimeError,
+        match="Failed to get response from model after 5 tries"
+    ):
         invoke_model("test-model", "Test prompt", "test-key")
 
     assert mock_urlopen.call_count == 5
@@ -320,8 +338,7 @@ def test_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
 
 def test_default_model():
     """Test that default model is correct."""
-    import argparse
-    from sublator import main
+    import argparse  # pylint: disable=import-outside-toplevel
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-l", "--lang", required=True)
@@ -336,14 +353,18 @@ def test_default_model():
 
 def test_custom_model_and_batch_size():
     """Test custom model and batch size arguments."""
-    import argparse
+    import argparse  # pylint: disable=import-outside-toplevel
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-l", "--lang", required=True)
     parser.add_argument("-m", "--model", default="google/gemini-2.5-flash-lite")
     parser.add_argument("--batch-size", type=int, default=100)
 
-    args = parser.parse_args(["--lang", "French", "--model", "custom-model", "--batch-size", "50"])
+    args = parser.parse_args([
+        "--lang", "French",
+        "--model", "custom-model",
+        "--batch-size", "50"
+    ])
 
     assert args.lang == "French"
     assert args.model == "custom-model"

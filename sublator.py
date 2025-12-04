@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""
+Sublator - Translate SRT subtitles using LLMs via OpenRouter API.
+
+This module provides functionality to translate subtitle files in SRT format
+using language models accessed through the OpenRouter API.
+"""
 
 import sys
 import os
@@ -114,7 +120,9 @@ def invoke_model(model: str, prompt: str, api_key: str) -> str:
     raise RuntimeError("Failed to get response from model after 5 tries.")
 
 
-def translate_batch(texts: List[str], target_language: str, model: str, api_key: str) -> List[str]:
+def translate_batch(
+    texts: List[str], target_language: str, model: str, api_key: str
+) -> List[str]:
     """
     Translate a batch of subtitle texts.
 
@@ -131,9 +139,14 @@ def translate_batch(texts: List[str], target_language: str, model: str, api_key:
     joined_texts = "\n---\n".join(texts)
 
     # Construct prompt
-    prompt = f"""Translate the following subtitles to {target_language}. Each subtitle is separated by "---". Maintain the same number of subtitles and use "---" as separator in your response. Output only the translated subtitles:
-
-{joined_texts}"""
+    prompt = (
+        f"Translate the following subtitles to {target_language}. "
+        'Each subtitle is separated by "---". '
+        "Maintain the same number of subtitles and "
+        'use "---" as separator in your response. '
+        "Output only the translated subtitles:\n\n"
+        f"{joined_texts}"
+    )
 
     # Retry indefinitely until we get the correct count
     attempt = 0
@@ -149,16 +162,26 @@ def translate_batch(texts: List[str], target_language: str, model: str, api_key:
             return translations
 
         attempt += 1
-        print(f"Warning: Expected {len(texts)} translations but got {len(translations)}", file=sys.stderr)
-        print(f"Retrying translation (attempt {attempt})...", file=sys.stderr)
+        print(
+            f"Warning: Expected {len(texts)} translations "
+            f"but got {len(translations)}",
+            file=sys.stderr
+        )
+        print(
+            f"Retrying translation (attempt {attempt})...",
+            file=sys.stderr
+        )
         sleep(1.0)
 
 
-def main():
+def main():  # pylint: disable=too-many-locals
     """Main entry point for the sublator script."""
     parser = argparse.ArgumentParser(
         description="Translate SRT subtitles using LLMs via OpenRouter API",
-        epilog="Example: cat input.srt | sublator.py --lang Spanish > output.srt"
+        epilog=(
+            "Example: "
+            "cat input.srt | sublator.py --lang Spanish > output.srt"
+        )
     )
     parser.add_argument(
         "-l", "--lang",
@@ -168,7 +191,10 @@ def main():
     parser.add_argument(
         "-m", "--model",
         default="google/gemini-2.5-flash-lite-preview-09-2025",
-        help="LLM model to use (default: google/gemini-2.5-flash-lite-preview-09-2025)"
+        help=(
+            "LLM model to use "
+            "(default: google/gemini-2.5-flash-lite-preview-09-2025)"
+        )
     )
     parser.add_argument(
         "--batch-size",
@@ -182,7 +208,10 @@ def main():
     # Check for API key
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        print("Error: OPENROUTER_API_KEY environment variable is not set", file=sys.stderr)
+        print(
+            "Error: OPENROUTER_API_KEY environment variable is not set",
+            file=sys.stderr
+        )
         sys.exit(1)
 
     # Read SRT content from stdin
@@ -192,11 +221,7 @@ def main():
         sys.exit(1)
 
     # Parse SRT
-    try:
-        entries = parse_srt(srt_content)
-    except Exception as e:
-        print(f"Error parsing SRT: {e}", file=sys.stderr)
-        sys.exit(1)
+    entries = parse_srt(srt_content)
 
     if not entries:
         print("Error: No valid subtitle entries found", file=sys.stderr)
@@ -214,16 +239,21 @@ def main():
         end_idx = min(start_idx + batch_size, total_entries)
         batch_entries = entries[start_idx:end_idx]
 
-        print(f"Translating batch {batch_idx + 1}/{num_batches} (subtitles {start_idx + 1}-{end_idx})...",
-              file=sys.stderr)
+        print(
+            f"Translating batch {batch_idx + 1}/{num_batches} "
+            f"(subtitles {start_idx + 1}-{end_idx})...",
+            file=sys.stderr
+        )
 
         # Extract texts from batch
         texts = [text for _, _, text in batch_entries]
 
         # Translate batch
         try:
-            translations = translate_batch(texts, args.lang, args.model, api_key)
-        except Exception as e:
+            translations = translate_batch(
+                texts, args.lang, args.model, api_key
+            )
+        except RuntimeError as e:
             print(f"Error translating batch: {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -235,7 +265,10 @@ def main():
     output = format_srt(translated_entries)
     print(output)
 
-    print(f"Translation complete! Processed {total_entries} subtitles.", file=sys.stderr)
+    print(
+        f"Translation complete! Processed {total_entries} subtitles.",
+        file=sys.stderr
+    )
 
 
 if __name__ == "__main__":

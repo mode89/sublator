@@ -12,7 +12,7 @@ import json
 import argparse
 from urllib.request import urlopen, Request, HTTPError, URLError
 from time import sleep
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 
 def parse_srt(srt_content: str) -> List[Tuple[str, str, str]]:
@@ -121,16 +121,22 @@ def invoke_model(model: str, prompt: str, api_key: str) -> str:
 
 
 def translate_batch(
-    texts: List[str], target_language: str, model: str, api_key: str
+    texts: List[str],
+    target_language: str,
+    model: str,
+    api_key: str,
+    context_entries: Optional[List[Tuple[str, str]]] = None
 ) -> List[str]:
     """
-    Translate a batch of subtitle texts.
+    Translate a batch of subtitle texts with optional context.
 
     Args:
         texts: List of subtitle text contents
         target_language: Target language name
         model: Model identifier
         api_key: OpenRouter API key
+        context_entries: Optional list of (original, translated) tuples
+                        from previous batch for context
 
     Returns:
         List of translated texts
@@ -138,15 +144,37 @@ def translate_batch(
     # Join texts with separator
     joined_texts = "\n---\n".join(texts)
 
-    # Construct prompt
-    prompt = (
-        f"Translate the following subtitles to {target_language}. "
-        'Each subtitle is separated by "---". '
-        "Maintain the same number of subtitles and "
-        'use "---" as separator in your response. '
-        "Output only the translated subtitles:\n\n"
-        f"{joined_texts}"
-    )
+    # Construct prompt with optional context
+    if context_entries and len(context_entries) > 0:
+        # Format context entries
+        context_parts = []
+        for original, translated in context_entries:
+            context_parts.append(f"{original}\n===\n{translated}")
+        context_text = "\n---\n".join(context_parts)
+
+        prompt = (
+            f"Here are {len(context_entries)} previous subtitles for "
+            "context (DO NOT translate these - they are already "
+            f"translated to {target_language} for your reference only):\n\n"
+            f"{context_text}\n\n"
+            f"Now translate the following {len(texts)} NEW subtitles to "
+            f"{target_language}. "
+            'Each subtitle is separated by "---". '
+            f"You MUST output exactly {len(texts)} translations. "
+            'Use "---" as separator in your response. '
+            f"IMPORTANT: Output ONLY the {len(texts)} new translations below "
+            "(NOT the context above):\n\n"
+            f"{joined_texts}"
+        )
+    else:
+        prompt = (
+            f"Translate the following subtitles to {target_language}. "
+            'Each subtitle is separated by "---". '
+            "Maintain the same number of subtitles and "
+            'use "---" as separator in your response. '
+            "Output only the translated subtitles:\n\n"
+            f"{joined_texts}"
+        )
 
     # Retry indefinitely until we get the correct count
     attempt = 0
@@ -202,8 +230,23 @@ def main():  # pylint: disable=too-many-locals
         default=100,
         help="Number of subtitles to translate per batch (default: 100)"
     )
+    parser.add_argument(
+        "--context-size",
+        type=int,
+        default=None,
+        help=(
+            "Number of previous translations to include as context "
+            "(default: half of batch-size)"
+        )
+    )
 
     args = parser.parse_args()
+
+    # Calculate default context size if not provided
+    context_size = (
+        args.context_size if args.context_size is not None
+        else args.batch_size // 2
+    )
 
     # Check for API key
     api_key = os.getenv("OPENROUTER_API_KEY")
@@ -233,6 +276,7 @@ def main():  # pylint: disable=too-many-locals
     num_batches = (total_entries + batch_size - 1) // batch_size
 
     translated_entries = []
+    context_entries = []  # Track context for next batch
 
     for batch_idx in range(num_batches):
         start_idx = batch_idx * batch_size
@@ -241,17 +285,19 @@ def main():  # pylint: disable=too-many-locals
 
         print(
             f"Translating batch {batch_idx + 1}/{num_batches} "
-            f"(subtitles {start_idx + 1}-{end_idx})...",
+            f"(subtitles {start_idx + 1}-{end_idx})"
+            + (f" with {len(context_entries)} context entries..."
+               if context_entries else "..."),
             file=sys.stderr
         )
 
         # Extract texts from batch
         texts = [text for _, _, text in batch_entries]
 
-        # Translate batch
+        # Translate batch with context
         try:
             translations = translate_batch(
-                texts, args.lang, args.model, api_key
+                texts, args.lang, args.model, api_key, context_entries
             )
         except RuntimeError as e:
             print(f"Error translating batch: {e}", file=sys.stderr)
@@ -260,6 +306,13 @@ def main():  # pylint: disable=too-many-locals
         # Reconstruct entries with translations
         for i, (seq_num, timestamp, _) in enumerate(batch_entries):
             translated_entries.append((seq_num, timestamp, translations[i]))
+
+        # Update context for next batch
+        current_batch_for_context = list(zip(texts, translations))
+        if len(current_batch_for_context) <= context_size:
+            context_entries = current_batch_for_context
+        else:
+            context_entries = current_batch_for_context[-context_size:]
 
     # Format and output
     output = format_srt(translated_entries)

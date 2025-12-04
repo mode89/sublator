@@ -398,5 +398,120 @@ subtitle text
     assert formatted == original_srt
 
 
+# Context-Aware Translation Tests
+
+@patch("sublator.invoke_model")
+def test_translate_batch_with_context(mock_invoke):
+    """Test batch translation with context entries."""
+    mock_invoke.return_value = "Spanish 3\n---\nSpanish 4"
+
+    texts = ["English 3", "English 4"]
+    context = [("English 1", "Spanish 1"), ("English 2", "Spanish 2")]
+
+    translations = translate_batch(
+        texts, "Spanish", "test-model", "test-key", context
+    )
+
+    assert len(translations) == 2
+    assert translations[0] == "Spanish 3"
+    assert translations[1] == "Spanish 4"
+
+    # Verify prompt contains context
+    call_args = mock_invoke.call_args
+    prompt = call_args[0][1]
+    assert "English 1" in prompt
+    assert "Spanish 1" in prompt
+    assert "===" in prompt
+    assert "DO NOT translate" in prompt
+    assert "context" in prompt.lower()
+
+
+@patch("sublator.invoke_model")
+def test_translate_batch_without_context(mock_invoke):
+    """Test batch translation without context (backward compatibility)."""
+    mock_invoke.return_value = "Spanish 1\n---\nSpanish 2"
+
+    texts = ["English 1", "English 2"]
+    translations = translate_batch(
+        texts, "Spanish", "test-model", "test-key", None
+    )
+
+    assert len(translations) == 2
+    assert translations[0] == "Spanish 1"
+    assert translations[1] == "Spanish 2"
+
+    # Verify prompt does NOT contain context markers
+    call_args = mock_invoke.call_args
+    prompt = call_args[0][1]
+    assert "context" not in prompt.lower()
+    assert "===" not in prompt
+
+
+@patch("sublator.invoke_model")
+def test_translate_batch_with_empty_context(mock_invoke):
+    """Test batch translation with empty context list."""
+    mock_invoke.return_value = "Spanish 1\n---\nSpanish 2"
+
+    texts = ["English 1", "English 2"]
+    translations = translate_batch(
+        texts, "Spanish", "test-model", "test-key", []
+    )
+
+    assert len(translations) == 2
+
+    # Verify prompt does NOT contain context markers
+    call_args = mock_invoke.call_args
+    prompt = call_args[0][1]
+    assert "context" not in prompt.lower()
+
+
+def test_context_size_calculations():
+    """Test context size defaults and edge cases."""
+    # Default: half of batch size
+    batch_size = 100
+    context_size = batch_size // 2
+    assert context_size == 50
+
+    # Small batch vs large context: use entire batch
+    batch = [("a", "b")] * 8
+    context_size = 20
+    context = batch if len(batch) <= context_size else batch[-context_size:]
+    assert len(context) == 8
+
+    # Large batch: use last N
+    batch = [("a", "b")] * 100
+    context_size = 10
+    context = batch if len(batch) <= context_size else batch[-context_size:]
+    assert len(context) == 10
+
+    # Context size larger than batch: use entire batch
+    batch = [("a", "b")] * 30
+    context_size = 50
+    context = batch if len(batch) <= context_size else batch[-context_size:]
+    assert len(context) == 30
+
+
+@patch("sublator.invoke_model")
+def test_translate_batch_multiline_with_context(mock_invoke):
+    """Test that multi-line subtitles work correctly with context."""
+    mock_invoke.return_value = "Spanish multi\nline 2"
+
+    texts = ["English multi\nline 2"]
+    context = [("English line 1", "Spanish line 1")]
+
+    translations = translate_batch(
+        texts, "Spanish", "test-model", "test-key", context
+    )
+
+    assert len(translations) == 1
+    assert "\n" in translations[0]
+
+    # Verify context is in prompt
+    call_args = mock_invoke.call_args
+    prompt = call_args[0][1]
+    assert "English line 1" in prompt
+    assert "Spanish line 1" in prompt
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

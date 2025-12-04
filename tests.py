@@ -255,13 +255,13 @@ def test_translate_batch_max_retries_exceeded(mock_sleep, mock_invoke):
         RuntimeError,
         match="Failed to produce 2 translations after 3 attempts"
     ):
-        translate_batch(
-            texts,
-            "Spanish",
-            "test-model",
-            "test-key",
-            max_retries=3
-        )
+        with patch("sublator.MAX_TRANSLATE_RETRIES", 3):
+            translate_batch(
+                texts,
+                "Spanish",
+                "test-model",
+                "test-key"
+            )
 
     assert mock_invoke.call_count == 3
     assert mock_sleep.call_count == 2  # Sleeps between attempts, not after last

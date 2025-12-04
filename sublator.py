@@ -15,6 +15,9 @@ from time import sleep
 from typing import List, Tuple, Optional
 
 
+MAX_TRANSLATE_RETRIES = 5
+
+
 def parse_srt(srt_content: str) -> List[Tuple[str, str, str]]:
     """
     Parse SRT content into a list of subtitle entries.
@@ -125,8 +128,7 @@ def translate_batch(
     target_language: str,
     model: str,
     api_key: str,
-    context_entries: Optional[List[Tuple[str, str]]] = None,
-    max_retries: int = 5
+    context_entries: Optional[List[Tuple[str, str]]] = None
 ) -> List[str]:
     """
     Translate a batch of subtitle texts with optional context.
@@ -138,7 +140,6 @@ def translate_batch(
         api_key: OpenRouter API key
         context_entries: Optional list of (original, translated) tuples
                         from previous batch for context
-        max_retries: Maximum attempts to get correct translation count
 
     Returns:
         List of translated texts
@@ -178,7 +179,7 @@ def translate_batch(
             f"{joined_texts}"
         )
 
-    for attempt in range(max_retries):
+    for attempt in range(MAX_TRANSLATE_RETRIES):
         # Get translation
         response = invoke_model(model, prompt, api_key)
 
@@ -194,7 +195,7 @@ def translate_batch(
             f"but got {len(translations)}",
             file=sys.stderr
         )
-        if attempt < max_retries - 1:
+        if attempt < MAX_TRANSLATE_RETRIES - 1:
             print(
                 f"Retrying translation (attempt {attempt + 1})...",
                 file=sys.stderr
@@ -205,7 +206,7 @@ def translate_batch(
 
     raise RuntimeError(
         f"Failed to produce {len(texts)} translations after "
-        f"{max_retries} attempts."
+        f"{MAX_TRANSLATE_RETRIES} attempts."
     )
 
 

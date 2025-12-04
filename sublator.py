@@ -236,7 +236,7 @@ def main():  # pylint: disable=too-many-locals
         default=None,
         help=(
             "Number of previous translations to include as context "
-            "(default: half of batch-size)"
+            "(default: batch size)"
         )
     )
 
@@ -245,7 +245,7 @@ def main():  # pylint: disable=too-many-locals
     # Calculate default context size if not provided
     context_size = (
         args.context_size if args.context_size is not None
-        else args.batch_size // 2
+        else args.batch_size
     )
 
     # Check for API key

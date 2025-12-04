@@ -37,7 +37,7 @@ cat input.srt | ./sublator.py --lang Spanish > output.srt
 - `-l, --lang` (required): Target language
 - `-m, --model` (optional): LLM model (default: `google/gemini-2.5-flash-preview-09-2025`)
 - `--batch-size` (optional): Subtitles per batch (default: 100)
-- `--context-size` (optional): Number of previous translations to include as context (default: half of batch-size)
+- `--context-size` (optional): Number of previous translations to include as context (default: batch size)
 
 ### Examples
 

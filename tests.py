@@ -467,10 +467,10 @@ def test_translate_batch_with_empty_context(mock_invoke):
 
 def test_context_size_calculations():
     """Test context size defaults and edge cases."""
-    # Default: half of batch size
+    # Default: same as batch size
     batch_size = 100
-    context_size = batch_size // 2
-    assert context_size == 50
+    context_size = batch_size
+    assert context_size == 100
 
     # Small batch vs large context: use entire batch
     batch = [("a", "b")] * 8

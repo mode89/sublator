@@ -135,21 +135,23 @@ def translate_batch(texts: List[str], target_language: str, model: str, api_key:
 
 {joined_texts}"""
 
-    # Get translation
-    response = invoke_model(model, prompt, api_key)
+    # Retry indefinitely until we get the correct count
+    attempt = 0
+    while True:
+        # Get translation
+        response = invoke_model(model, prompt, api_key)
 
-    # Split response by separator
-    translations = response.split("\n---\n")
+        # Split response by separator
+        translations = response.split("\n---\n")
 
-    # Validate count
-    if len(translations) != len(texts):
+        # Validate count
+        if len(translations) == len(texts):
+            return translations
+
+        attempt += 1
         print(f"Warning: Expected {len(texts)} translations but got {len(translations)}", file=sys.stderr)
-        # Pad or truncate to match
-        while len(translations) < len(texts):
-            translations.append(texts[len(translations)])  # Use original if missing
-        translations = translations[:len(texts)]
-
-    return translations
+        print(f"Retrying translation (attempt {attempt})...", file=sys.stderr)
+        sleep(1.0)
 
 
 def main():

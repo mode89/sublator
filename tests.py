@@ -221,17 +221,23 @@ def test_translate_batch_success(mock_invoke):
 
 
 @patch("sublator.invoke_model")
-def test_translate_batch_count_mismatch(mock_invoke):
+@patch("sublator.sleep")
+def test_translate_batch_count_mismatch(mock_sleep, mock_invoke):
     """Test handling of count mismatch in translations."""
-    # Mock returns only 2 translations when 3 expected
-    mock_invoke.return_value = "Spanish 1\n---\nSpanish 2"
+    # Mock returns wrong count first, then correct count on retry
+    mock_invoke.side_effect = [
+        "Spanish 1\n---\nSpanish 2",  # Wrong count (2 instead of 3)
+        "Spanish 1\n---\nSpanish 2\n---\nSpanish 3"  # Correct count
+    ]
 
     texts = ["English 1", "English 2", "English 3"]
 
-    # Should handle gracefully by padding
+    # Should retry until correct count
     translations = translate_batch(texts, "Spanish", "test-model", "test-key")
 
-    assert len(translations) == 3  # Should pad to match
+    assert len(translations) == 3
+    assert mock_invoke.call_count == 2  # Called twice due to retry
+    assert mock_sleep.call_count == 1  # Slept once between retries
 
 
 @patch("sublator.invoke_model")

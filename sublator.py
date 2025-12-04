@@ -125,7 +125,8 @@ def translate_batch(
     target_language: str,
     model: str,
     api_key: str,
-    context_entries: Optional[List[Tuple[str, str]]] = None
+    context_entries: Optional[List[Tuple[str, str]]] = None,
+    max_retries: int = 5
 ) -> List[str]:
     """
     Translate a batch of subtitle texts with optional context.
@@ -137,6 +138,7 @@ def translate_batch(
         api_key: OpenRouter API key
         context_entries: Optional list of (original, translated) tuples
                         from previous batch for context
+        max_retries: Maximum attempts to get correct translation count
 
     Returns:
         List of translated texts
@@ -176,9 +178,7 @@ def translate_batch(
             f"{joined_texts}"
         )
 
-    # Retry indefinitely until we get the correct count
-    attempt = 0
-    while True:
+    for attempt in range(max_retries):
         # Get translation
         response = invoke_model(model, prompt, api_key)
 
@@ -189,21 +189,28 @@ def translate_batch(
         if len(translations) == len(texts):
             return translations
 
-        attempt += 1
         print(
             f"Warning: Expected {len(texts)} translations "
             f"but got {len(translations)}",
             file=sys.stderr
         )
-        print(
-            f"Retrying translation (attempt {attempt})...",
-            file=sys.stderr
-        )
-        sleep(1.0)
+        if attempt < max_retries - 1:
+            print(
+                f"Retrying translation (attempt {attempt + 1})...",
+                file=sys.stderr
+            )
+            sleep(1.0)
+        else:
+            break
+
+    raise RuntimeError(
+        f"Failed to produce {len(texts)} translations after "
+        f"{max_retries} attempts."
+    )
 
 
-def main():  # pylint: disable=too-many-locals
-    """Main entry point for the sublator script."""
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Create and return the CLI argument parser."""
     parser = argparse.ArgumentParser(
         description="Translate SRT subtitles using LLMs via OpenRouter API",
         epilog=(
@@ -240,6 +247,12 @@ def main():  # pylint: disable=too-many-locals
         )
     )
 
+    return parser
+
+
+def main():  # pylint: disable=too-many-locals
+    """Main entry point for the sublator script."""
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     # Calculate default context size if not provided

@@ -12,7 +12,13 @@ from urllib.error import URLError
 import pytest  # pylint: disable=import-error
 
 # Import functions from sublator
-from sublator import parse_srt, format_srt, translate_batch, invoke_model
+from sublator import (
+    parse_srt,
+    format_srt,
+    translate_batch,
+    invoke_model,
+    build_arg_parser,
+)
 
 
 # SRT Parsing Tests
@@ -162,56 +168,6 @@ def test_format_empty_list():
     assert output == ""
 
 
-# Batching Logic Tests
-
-def test_batch_size_calculations():
-    """Test batch size calculations."""
-    # Test with exactly 100 entries
-    entries = [
-        (str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
-        for i in range(100)
-    ]
-    assert len(entries) == 100
-
-    # Test with less than batch size
-    entries = [
-        (str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
-        for i in range(50)
-    ]
-    assert len(entries) == 50
-
-    # Test with more than batch size
-    entries = [
-        (str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
-        for i in range(250)
-    ]
-    assert len(entries) == 250
-
-    # Calculate number of batches needed
-    batch_size = 100
-    num_batches = (len(entries) + batch_size - 1) // batch_size
-    assert num_batches == 3
-
-
-def test_join_with_separator():
-    """Test joining texts with separator."""
-    texts = ["First", "Second", "Third"]
-    joined = "\n---\n".join(texts)
-
-    assert joined == "First\n---\nSecond\n---\nThird"
-
-
-def test_split_translations():
-    """Test splitting translated response."""
-    response = "Primero\n---\nSegundo\n---\nTercero"
-    translations = response.split("\n---\n")
-
-    assert len(translations) == 3
-    assert translations[0] == "Primero"
-    assert translations[1] == "Segundo"
-    assert translations[2] == "Tercero"
-
-
 # Batch Translation Tests
 
 @patch("sublator.invoke_model")
@@ -265,6 +221,50 @@ def test_translate_batch_preserves_multi_line(mock_invoke):
 
     assert len(translations) == 1
     assert "\n" in translations[0]  # Multi-line preserved
+
+
+@patch("sublator.invoke_model")
+def test_translate_batch_includes_context(mock_invoke):
+    """Test that context entries are embedded in the prompt."""
+    mock_invoke.return_value = "Translated 1\n---\nTranslated 2"
+
+    texts = ["English 1", "English 2"]
+    context_entries = [("Prev 1", "Prev T1"), ("Prev 2", "Prev T2")]
+
+    translations = translate_batch(
+        texts, "Spanish", "test-model", "test-key", context_entries
+    )
+
+    assert translations == ["Translated 1", "Translated 2"]
+    prompt = mock_invoke.call_args[0][1]
+    assert "Here are 2 previous subtitles" in prompt
+    for original, translated in context_entries:
+        assert f"{original}\n===\n{translated}" in prompt
+    assert "Now translate the following 2 NEW subtitles" in prompt
+
+
+@patch("sublator.invoke_model")
+@patch("sublator.sleep")
+def test_translate_batch_max_retries_exceeded(mock_sleep, mock_invoke):
+    """Test that translate_batch raises after max retries on count mismatch."""
+    mock_invoke.return_value = "Only one translation"
+
+    texts = ["English 1", "English 2"]
+
+    with pytest.raises(
+        RuntimeError,
+        match="Failed to produce 2 translations after 3 attempts"
+    ):
+        translate_batch(
+            texts,
+            "Spanish",
+            "test-model",
+            "test-key",
+            max_retries=3
+        )
+
+    assert mock_invoke.call_count == 3
+    assert mock_sleep.call_count == 2  # Sleeps between attempts, not after last
 
 
 # API Invocation Tests
@@ -338,28 +338,16 @@ def test_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
 
 def test_default_model():
     """Test that default model is correct."""
-    import argparse  # pylint: disable=import-outside-toplevel
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-l", "--lang", required=True)
-    parser.add_argument("-m", "--model", default="google/gemini-2.5-flash-lite")
-    parser.add_argument("--batch-size", type=int, default=100)
-
+    parser = build_arg_parser()
     args = parser.parse_args(["--lang", "Spanish"])
 
-    assert args.model == "google/gemini-2.5-flash-lite"
+    assert args.model == "google/gemini-2.5-flash-preview-09-2025"
     assert args.batch_size == 100
 
 
 def test_custom_model_and_batch_size():
     """Test custom model and batch size arguments."""
-    import argparse  # pylint: disable=import-outside-toplevel
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-l", "--lang", required=True)
-    parser.add_argument("-m", "--model", default="google/gemini-2.5-flash-lite")
-    parser.add_argument("--batch-size", type=int, default=100)
-
+    parser = build_arg_parser()
     args = parser.parse_args([
         "--lang", "French",
         "--model", "custom-model",

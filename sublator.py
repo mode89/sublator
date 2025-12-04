@@ -218,10 +218,10 @@ def main():  # pylint: disable=too-many-locals
     )
     parser.add_argument(
         "-m", "--model",
-        default="google/gemini-2.5-flash-lite-preview-09-2025",
+        default="google/gemini-2.5-flash-preview-09-2025",
         help=(
             "LLM model to use "
-            "(default: google/gemini-2.5-flash-lite-preview-09-2025)"
+            "(default: google/gemini-2.5-flash-preview-09-2025)"
         )
     )
     parser.add_argument(

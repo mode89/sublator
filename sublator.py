@@ -17,19 +17,19 @@ def parse_srt(srt_content: str) -> List[Tuple[str, str, str]]:
         List of tuples: (sequence_number, timestamp_line, text_content)
     """
     entries = []
-    blocks = srt_content.strip().split('\n\n')
+    blocks = srt_content.strip().split("\n\n")
 
     for block in blocks:
         if not block.strip():
             continue
 
-        lines = block.split('\n')
+        lines = block.split("\n")
         if len(lines) < 3:
             continue
 
         sequence_number = lines[0].strip()
         timestamp_line = lines[1].strip()
-        text_content = '\n'.join(lines[2:])
+        text_content = "\n".join(lines[2:])
 
         entries.append((sequence_number, timestamp_line, text_content))
 
@@ -47,19 +47,19 @@ def format_srt(entries: List[Tuple[str, str, str]]) -> str:
         SRT formatted string
     """
     if not entries:
-        return ''
+        return ""
 
     result = []
     for sequence_number, timestamp_line, text_content in entries:
         result.append(sequence_number)
         result.append(timestamp_line)
         result.append(text_content)
-        result.append('')  # Blank line separator
+        result.append("")  # Blank line separator
 
     # Join and ensure it ends with double newline
-    output = '\n'.join(result)
-    if not output.endswith('\n\n'):
-        output += '\n'
+    output = "\n".join(result)
+    if not output.endswith("\n\n"):
+        output += "\n"
 
     return output
 
@@ -128,10 +128,10 @@ def translate_batch(texts: List[str], target_language: str, model: str, api_key:
         List of translated texts
     """
     # Join texts with separator
-    joined_texts = '\n---\n'.join(texts)
+    joined_texts = "\n---\n".join(texts)
 
     # Construct prompt
-    prompt = f"""Translate the following subtitles to {target_language}. Each subtitle is separated by '---'. Maintain the same number of subtitles and use '---' as separator in your response. Output only the translated subtitles:
+    prompt = f"""Translate the following subtitles to {target_language}. Each subtitle is separated by "---". Maintain the same number of subtitles and use "---" as separator in your response. Output only the translated subtitles:
 
 {joined_texts}"""
 
@@ -139,7 +139,7 @@ def translate_batch(texts: List[str], target_language: str, model: str, api_key:
     response = invoke_model(model, prompt, api_key)
 
     # Split response by separator
-    translations = response.split('\n---\n')
+    translations = response.split("\n---\n")
 
     # Validate count
     if len(translations) != len(texts):
@@ -159,26 +159,26 @@ def main():
         epilog="Example: cat input.srt | sublator.py --lang Spanish > output.srt"
     )
     parser.add_argument(
-        '-l', '--lang',
+        "-l", "--lang",
         required=True,
-        help='Target language (e.g., Spanish, French, Japanese)'
+        help="Target language (e.g., Spanish, French, Japanese)"
     )
     parser.add_argument(
-        '-m', '--model',
+        "-m", "--model",
         default="google/gemini-2.5-flash-lite-preview-09-2025",
-        help='LLM model to use (default: google/gemini-2.5-flash-lite-preview-09-2025)'
+        help="LLM model to use (default: google/gemini-2.5-flash-lite-preview-09-2025)"
     )
     parser.add_argument(
-        '--batch-size',
+        "--batch-size",
         type=int,
         default=100,
-        help='Number of subtitles to translate per batch (default: 100)'
+        help="Number of subtitles to translate per batch (default: 100)"
     )
 
     args = parser.parse_args()
 
     # Check for API key
-    api_key = os.getenv('OPENROUTER_API_KEY')
+    api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         print("Error: OPENROUTER_API_KEY environment variable is not set", file=sys.stderr)
         sys.exit(1)
@@ -236,5 +236,5 @@ def main():
     print(f"Translation complete! Processed {total_entries} subtitles.", file=sys.stderr)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

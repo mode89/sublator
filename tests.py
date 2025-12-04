@@ -25,8 +25,8 @@ Second subtitle"""
     entries = parse_srt(srt_content)
 
     assert len(entries) == 2
-    assert entries[0] == ('1', '00:00:01,000 --> 00:00:02,000', 'Hello World')
-    assert entries[1] == ('2', '00:00:03,000 --> 00:00:04,000', 'Second subtitle')
+    assert entries[0] == ("1", "00:00:01,000 --> 00:00:02,000", "Hello World")
+    assert entries[1] == ("2", "00:00:03,000 --> 00:00:04,000", "Second subtitle")
 
 
 def test_parse_multi_line_subtitles():
@@ -44,8 +44,8 @@ Single line"""
     entries = parse_srt(srt_content)
 
     assert len(entries) == 2
-    assert entries[0][2] == 'Line one\nLine two\nLine three'
-    assert entries[1][2] == 'Single line'
+    assert entries[0][2] == "Line one\nLine two\nLine three"
+    assert entries[1][2] == "Single line"
 
 
 def test_parse_with_special_characters():
@@ -65,9 +65,9 @@ Text with <i>italics</i>"""
     entries = parse_srt(srt_content)
 
     assert len(entries) == 3
-    assert entries[0][2] == '[ Sound Effect ]'
-    assert entries[1][2] == '"Quoted text"'
-    assert entries[2][2] == 'Text with <i>italics</i>'
+    assert entries[0][2] == "[ Sound Effect ]"
+    assert entries[1][2] == "\"Quoted text\""
+    assert entries[2][2] == "Text with <i>italics</i>"
 
 
 def test_parse_empty_content():
@@ -96,8 +96,8 @@ Another valid entry"""
 
     # Should skip malformed entry but parse valid ones
     assert len(entries) == 2
-    assert entries[0][0] == '1'
-    assert entries[1][0] == '3'
+    assert entries[0][0] == "1"
+    assert entries[1][0] == "3"
 
 
 # SRT Formatting Tests
@@ -105,8 +105,8 @@ Another valid entry"""
 def test_format_simple_entries():
     """Test formatting simple subtitle entries."""
     entries = [
-        ('1', '00:00:01,000 --> 00:00:02,000', 'First subtitle'),
-        ('2', '00:00:03,000 --> 00:00:04,000', 'Second subtitle')
+        ("1", "00:00:01,000 --> 00:00:02,000", "First subtitle"),
+        ("2", "00:00:03,000 --> 00:00:04,000", "Second subtitle")
     ]
 
     output = format_srt(entries)
@@ -126,20 +126,20 @@ Second subtitle
 def test_format_multi_line_subtitles():
     """Test formatting multi-line subtitles."""
     entries = [
-        ('1', '00:00:01,000 --> 00:00:02,000', 'Line one\nLine two'),
+        ("1", "00:00:01,000 --> 00:00:02,000", "Line one\nLine two"),
     ]
 
     output = format_srt(entries)
 
-    assert 'Line one\nLine two' in output
-    assert output.endswith('\n\n')
+    assert "Line one\nLine two" in output
+    assert output.endswith("\n\n")
 
 
 def test_format_preserves_timestamp_format():
     """Test that timestamp format is preserved exactly."""
-    timestamp = '00:02:43,747 --> 00:02:47,458'
+    timestamp = "00:02:43,747 --> 00:02:47,458"
     entries = [
-        ('1', timestamp, 'Text'),
+        ("1", timestamp, "Text"),
     ]
 
     output = format_srt(entries)
@@ -150,7 +150,7 @@ def test_format_preserves_timestamp_format():
 def test_format_empty_list():
     """Test formatting empty list."""
     output = format_srt([])
-    assert output == ''
+    assert output == ""
 
 
 # Batching Logic Tests
@@ -158,17 +158,17 @@ def test_format_empty_list():
 def test_batch_size_calculations():
     """Test batch size calculations."""
     # Test with exactly 100 entries
-    entries = [(str(i), f'00:00:{i:02d},000 --> 00:00:{i+1:02d},000', f'Text {i}')
+    entries = [(str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
                for i in range(100)]
     assert len(entries) == 100
 
     # Test with less than batch size
-    entries = [(str(i), f'00:00:{i:02d},000 --> 00:00:{i+1:02d},000', f'Text {i}')
+    entries = [(str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
                for i in range(50)]
     assert len(entries) == 50
 
     # Test with more than batch size
-    entries = [(str(i), f'00:00:{i:02d},000 --> 00:00:{i+1:02d},000', f'Text {i}')
+    entries = [(str(i), f"00:00:{i:02d},000 --> 00:00:{i+1:02d},000", f"Text {i}")
                for i in range(250)]
     assert len(entries) == 250
 
@@ -180,75 +180,75 @@ def test_batch_size_calculations():
 
 def test_join_with_separator():
     """Test joining texts with separator."""
-    texts = ['First', 'Second', 'Third']
-    joined = '\n---\n'.join(texts)
+    texts = ["First", "Second", "Third"]
+    joined = "\n---\n".join(texts)
 
-    assert joined == 'First\n---\nSecond\n---\nThird'
+    assert joined == "First\n---\nSecond\n---\nThird"
 
 
 def test_split_translations():
     """Test splitting translated response."""
-    response = 'Primero\n---\nSegundo\n---\nTercero'
-    translations = response.split('\n---\n')
+    response = "Primero\n---\nSegundo\n---\nTercero"
+    translations = response.split("\n---\n")
 
     assert len(translations) == 3
-    assert translations[0] == 'Primero'
-    assert translations[1] == 'Segundo'
-    assert translations[2] == 'Tercero'
+    assert translations[0] == "Primero"
+    assert translations[1] == "Segundo"
+    assert translations[2] == "Tercero"
 
 
 # Batch Translation Tests
 
-@patch('sublator.invoke_model')
+@patch("sublator.invoke_model")
 def test_translate_batch_success(mock_invoke):
     """Test successful batch translation."""
-    mock_invoke.return_value = 'Spanish 1\n---\nSpanish 2\n---\nSpanish 3'
+    mock_invoke.return_value = "Spanish 1\n---\nSpanish 2\n---\nSpanish 3"
 
-    texts = ['English 1', 'English 2', 'English 3']
-    translations = translate_batch(texts, 'Spanish', 'test-model', 'test-key')
+    texts = ["English 1", "English 2", "English 3"]
+    translations = translate_batch(texts, "Spanish", "test-model", "test-key")
 
     assert len(translations) == 3
-    assert translations[0] == 'Spanish 1'
-    assert translations[1] == 'Spanish 2'
-    assert translations[2] == 'Spanish 3'
+    assert translations[0] == "Spanish 1"
+    assert translations[1] == "Spanish 2"
+    assert translations[2] == "Spanish 3"
 
     # Verify invoke_model was called correctly
     mock_invoke.assert_called_once()
     call_args = mock_invoke.call_args
-    assert call_args[0][0] == 'test-model'  # model
-    assert 'Spanish' in call_args[0][1]  # prompt contains target language
-    assert call_args[0][2] == 'test-key'  # api_key
+    assert call_args[0][0] == "test-model"  # model
+    assert "Spanish" in call_args[0][1]  # prompt contains target language
+    assert call_args[0][2] == "test-key"  # api_key
 
 
-@patch('sublator.invoke_model')
+@patch("sublator.invoke_model")
 def test_translate_batch_count_mismatch(mock_invoke):
     """Test handling of count mismatch in translations."""
     # Mock returns only 2 translations when 3 expected
-    mock_invoke.return_value = 'Spanish 1\n---\nSpanish 2'
+    mock_invoke.return_value = "Spanish 1\n---\nSpanish 2"
 
-    texts = ['English 1', 'English 2', 'English 3']
+    texts = ["English 1", "English 2", "English 3"]
 
     # Should handle gracefully by padding
-    translations = translate_batch(texts, 'Spanish', 'test-model', 'test-key')
+    translations = translate_batch(texts, "Spanish", "test-model", "test-key")
 
     assert len(translations) == 3  # Should pad to match
 
 
-@patch('sublator.invoke_model')
+@patch("sublator.invoke_model")
 def test_translate_batch_preserves_multi_line(mock_invoke):
     """Test that multi-line subtitles are preserved."""
-    mock_invoke.return_value = 'Spanish line 1\nSpanish line 2'
+    mock_invoke.return_value = "Spanish line 1\nSpanish line 2"
 
-    texts = ['English line 1\nEnglish line 2']
-    translations = translate_batch(texts, 'Spanish', 'test-model', 'test-key')
+    texts = ["English line 1\nEnglish line 2"]
+    translations = translate_batch(texts, "Spanish", "test-model", "test-key")
 
     assert len(translations) == 1
-    assert '\n' in translations[0]  # Multi-line preserved
+    assert "\n" in translations[0]  # Multi-line preserved
 
 
 # API Invocation Tests
 
-@patch('sublator.urlopen')
+@patch("sublator.urlopen")
 def test_invoke_model_success(mock_urlopen):
     """Test successful API invocation."""
     # Mock successful response
@@ -261,50 +261,50 @@ def test_invoke_model_success(mock_urlopen):
                 }
             }
         ]
-    }).encode('utf-8')
+    }).encode("utf-8")
     mock_response.__enter__ = Mock(return_value=mock_response)
     mock_response.__exit__ = Mock(return_value=False)
 
     mock_urlopen.return_value = mock_response
 
-    result = invoke_model('test-model', 'Test prompt', 'test-key')
+    result = invoke_model("test-model", "Test prompt", "test-key")
 
-    assert result == 'Translated text'
+    assert result == "Translated text"
     mock_urlopen.assert_called_once()
 
 
-@patch('sublator.urlopen')
-@patch('sublator.sleep')  # Mock sleep to speed up test
+@patch("sublator.urlopen")
+@patch("sublator.sleep")  # Mock sleep to speed up test
 def test_invoke_model_retry_on_error(mock_sleep, mock_urlopen):
     """Test retry logic on errors."""
     # First 2 calls fail, 3rd succeeds
     mock_urlopen.side_effect = [
-        URLError('Connection error'),
-        URLError('Connection error'),
+        URLError("Connection error"),
+        URLError("Connection error"),
         MagicMock(
             read=lambda: json.dumps({
                 "choices": [{"message": {"content": "Success"}}]
-            }).encode('utf-8'),
+            }).encode("utf-8"),
             __enter__=lambda self: self,
             __exit__=lambda *args: False
         )
     ]
 
-    result = invoke_model('test-model', 'Test prompt', 'test-key')
+    result = invoke_model("test-model", "Test prompt", "test-key")
 
-    assert result == 'Success'
+    assert result == "Success"
     assert mock_urlopen.call_count == 3
     assert mock_sleep.call_count == 2  # Slept between retries
 
 
-@patch('sublator.urlopen')
-@patch('sublator.sleep')
+@patch("sublator.urlopen")
+@patch("sublator.sleep")
 def test_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
     """Test that RuntimeError is raised after max retries."""
-    mock_urlopen.side_effect = URLError('Connection error')
+    mock_urlopen.side_effect = URLError("Connection error")
 
     with pytest.raises(RuntimeError, match="Failed to get response from model after 5 tries"):
-        invoke_model('test-model', 'Test prompt', 'test-key')
+        invoke_model("test-model", "Test prompt", "test-key")
 
     assert mock_urlopen.call_count == 5
     assert mock_sleep.call_count == 4  # Slept 4 times (not after last attempt)
@@ -318,13 +318,13 @@ def test_default_model():
     from sublator import main
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-l', '--lang', required=True)
-    parser.add_argument('-m', '--model', default='google/gemini-2.5-flash-lite')
-    parser.add_argument('--batch-size', type=int, default=100)
+    parser.add_argument("-l", "--lang", required=True)
+    parser.add_argument("-m", "--model", default="google/gemini-2.5-flash-lite")
+    parser.add_argument("--batch-size", type=int, default=100)
 
-    args = parser.parse_args(['--lang', 'Spanish'])
+    args = parser.parse_args(["--lang", "Spanish"])
 
-    assert args.model == 'google/gemini-2.5-flash-lite'
+    assert args.model == "google/gemini-2.5-flash-lite"
     assert args.batch_size == 100
 
 
@@ -333,14 +333,14 @@ def test_custom_model_and_batch_size():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-l', '--lang', required=True)
-    parser.add_argument('-m', '--model', default='google/gemini-2.5-flash-lite')
-    parser.add_argument('--batch-size', type=int, default=100)
+    parser.add_argument("-l", "--lang", required=True)
+    parser.add_argument("-m", "--model", default="google/gemini-2.5-flash-lite")
+    parser.add_argument("--batch-size", type=int, default=100)
 
-    args = parser.parse_args(['--lang', 'French', '--model', 'custom-model', '--batch-size', '50'])
+    args = parser.parse_args(["--lang", "French", "--model", "custom-model", "--batch-size", "50"])
 
-    assert args.lang == 'French'
-    assert args.model == 'custom-model'
+    assert args.lang == "French"
+    assert args.model == "custom-model"
     assert args.batch_size == 50
 
 
@@ -371,5 +371,5 @@ subtitle text
     assert formatted == original_srt
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

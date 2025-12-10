@@ -6,6 +6,7 @@ This module provides functionality to translate subtitle files in SRT format
 using language models accessed through the OpenRouter API.
 """
 
+from http.client import HTTPException
 import sys
 import os
 import json
@@ -108,6 +109,8 @@ def invoke_model(model: str, prompt: str, api_key: str) -> str:
             with urlopen(req) as res:
                 response_data = json.loads(res.read().decode("utf-8"))
                 return response_data["choices"][0]["message"]["content"]
+        except HTTPException as e:
+            print(f"HTTP Exception: {e}\n")
         except HTTPError as e:
             msg = e.read().decode("utf-8")
             print(f"HTTP Error {e.code}: {msg}", file=sys.stderr)

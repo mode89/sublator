@@ -238,8 +238,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=100,
-        help="Number of subtitles to translate per batch (default: 100)"
+        default=50,
+        help="Number of subtitles to translate per batch (default: 50)"
     )
     parser.add_argument(
         "--context-size",

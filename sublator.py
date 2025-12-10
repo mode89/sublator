@@ -16,7 +16,7 @@ from time import sleep
 from typing import List, Tuple, Optional
 
 
-MAX_TRANSLATE_RETRIES = 5
+MAX_TRANSLATE_RETRIES = 10
 
 
 def parse_srt(srt_content: str) -> List[Tuple[str, str, str]]:

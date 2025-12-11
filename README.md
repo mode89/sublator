@@ -29,6 +29,11 @@ export OPENROUTER_API_KEY="your-api-key-here"
 ## Usage
 
 ```bash
+# Examine movie file to find subtitle stream ID
+ffprobe <movie-file>
+# Extract subtitles to SRT
+ffmpeg -i <movie-file> -map 0:<stream-id> -f srt - > input.srt
+# Translate subtitles
 cat input.srt | ./sublator.py --lang Spanish > output.srt
 ```
 
@@ -58,5 +63,6 @@ cat series.srt | ./sublator.py --lang German --context-size 75 > series.de.srt
 ## Testing
 
 ```bash
-pytest tests.py -v
+pytest -v tests.py
+pytest -v tests.pml
 ```

@@ -1,6 +1,8 @@
 #! vim: ft=paimel
 
 import sublator as sl
+import unittest.mock refer { patch }
+import urllib.request refer { urlopen Request HTTPError URLError }
 
 def testParseSimpleSingleLine () =
   let content = """
@@ -162,3 +164,26 @@ def testParseFormatRoundTrip () =
   let parsed = sl.parseSrt original in
   let formatted = sl.formatSrt parsed in
   assert $ formatted == original
+
+# @patch("sublator.urlopen")
+# @patch("sublator.sleep")
+# def test_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
+#     """Test that RuntimeError is raised after max retries."""
+#     mock_urlopen.side_effect = URLError("Connection error")
+# 
+#     with pytest.raises(
+#         RuntimeError,
+#         match="Failed to get response from model after 5 tries"
+#     ):
+#         invoke_model("test-model", "Test prompt", "test-key")
+# 
+#     assert mock_urlopen.call_count == 5
+#     assert mock_sleep.call_count == 4  # Slept 4 times (not after last attempt)
+
+def testInvokeModelMaxRetriesExceeded () =
+  with mock_sleep = patch "sublator.urlopen" and
+       mock_urlopen = patch "sublator.sleep" and
+       mock_json_loads = patch "sublator.json.loads" do (
+    write! mock_urlopen.side_effect $ URLError "Connection error";
+    sl.invokeModel "test-key" "test-model" "Test prompt"
+  )

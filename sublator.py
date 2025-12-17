@@ -101,6 +101,10 @@ def invoke_model(model: str, prompt: str, api_key: str) -> str:
             "messages": [
                 {"role": "user", "content": prompt}
             ],
+            "reasoning": {
+                "enabled": True,
+                "effort": "low",
+            },
         }).encode("utf-8"),
     )
 
@@ -110,7 +114,7 @@ def invoke_model(model: str, prompt: str, api_key: str) -> str:
                 response_data = json.loads(res.read().decode("utf-8"))
                 return response_data["choices"][0]["message"]["content"]
         except HTTPException as e:
-            print(f"HTTP Exception: {e}\n")
+            print(f"HTTP Exception: {e}\n", file=sys.stderr)
         except HTTPError as e:
             msg = e.read().decode("utf-8")
             print(f"HTTP Error {e.code}: {msg}", file=sys.stderr)

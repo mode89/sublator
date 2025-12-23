@@ -16,6 +16,8 @@ from typing import List, Tuple, Optional
 
 
 MAX_TRANSLATE_RETRIES = 5
+DEFAULT_BATCH_SIZE = 50
+DEFAULT_MODEL = "google/gemini-2.5-flash-preview-09-2025"
 
 
 def parse_srt(srt_content: str) -> List[Tuple[str, str, str]]:
@@ -226,17 +228,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-m", "--model",
-        default="google/gemini-2.5-flash-preview-09-2025",
-        help=(
-            "LLM model to use "
-            "(default: google/gemini-2.5-flash-preview-09-2025)"
-        )
+        default=DEFAULT_MODEL,
+        help=f"LLM model to use (default: {DEFAULT_MODEL})",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=100,
-        help="Number of subtitles to translate per batch (default: 100)"
+        default=DEFAULT_BATCH_SIZE,
+        help="Number of subtitles to translate per batch "
+            f"(default: {DEFAULT_BATCH_SIZE})",
     )
     parser.add_argument(
         "--context-size",

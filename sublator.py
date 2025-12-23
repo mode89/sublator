@@ -10,6 +10,7 @@ import sys
 import os
 import json
 import argparse
+import subprocess
 from urllib.request import urlopen, Request, HTTPError, URLError
 from time import sleep
 from typing import List, Tuple, Optional
@@ -18,6 +19,64 @@ from typing import List, Tuple, Optional
 MAX_TRANSLATE_RETRIES = 5
 DEFAULT_BATCH_SIZE = 50
 DEFAULT_MODEL = "google/gemini-2.5-flash-preview-09-2025"
+
+
+def extract_subtitles_from_video(
+    video_path: str,
+    track_index: int
+) -> str:
+    """
+    Extract SRT subtitles from a video file using ffmpeg.
+
+    Args:
+        video_path: Path to the video file
+        track_index: Subtitle track index to extract (0-based)
+
+    Returns:
+        SRT subtitle content as a string
+
+    Raises:
+        FileNotFoundError: If video file doesn't exist
+        RuntimeError: If ffmpeg is not available or extraction fails
+    """
+    # Check if video file exists
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    # Check if ffmpeg is available
+    try:
+        subprocess.run(
+            ["ffmpeg", "-version"],
+            capture_output=True,
+            check=True,
+            text=True
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        raise RuntimeError(
+            "ffmpeg is not installed or not accessible. "
+            "Please install ffmpeg to use video subtitle extraction."
+        ) from e
+
+    # Extract subtitles using ffmpeg
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-i", video_path,
+                "-map", f"0:{track_index}",
+                "-f", "srt",
+                "-"
+            ],
+            capture_output=True,
+            check=True,
+            text=True
+        )
+        return result.stdout
+    except subprocess.CalledProcessError as e:
+        error_output = e.stderr if e.stderr else "Unknown error"
+        raise RuntimeError(
+            f"Failed to extract subtitles from video: {error_output}"
+        ) from e
 
 
 def parse_srt(srt_content: str) -> List[Tuple[str, str, str]]:
@@ -318,8 +377,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Translate SRT subtitles using LLMs via OpenRouter API",
         epilog=(
-            "Example: "
-            "cat input.srt | sublator.py --lang Spanish > output.srt"
+            "Examples:\n"
+            "  cat input.srt | sublator.py --lang Spanish > output.srt\n"
+            "  sublator.py --video movie.mkv --lang Spanish > output.srt"
         )
     )
     parser.add_argument(
@@ -348,6 +408,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "(default: batch size)"
         )
     )
+    parser.add_argument(
+        "--video",
+        type=str,
+        default=None,
+        help=(
+            "Path to video file to extract subtitles from. "
+            "If provided, stdin is ignored."
+        )
+    )
+    parser.add_argument(
+        "--stream-index",
+        dest="track_index",
+        type=int,
+        help=(
+            "Subtitle stream index to extract from video. "
+            "Required when using --video."
+        )
+    )
 
     return parser
 
@@ -356,6 +434,22 @@ def main():  # pylint: disable=too-many-locals
     """Main entry point for the sublator script."""
     parser = build_arg_parser()
     args = parser.parse_args()
+
+    # Validate that --video requires --stream-index
+    if args.video is not None and args.track_index is None:
+        print(
+            "Error: --video requires --stream-index",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
+    # Validate that --stream-index requires --video
+    if args.track_index is not None and args.video is None:
+        print(
+            "Error: --stream-index requires --video",
+            file=sys.stderr
+        )
+        sys.exit(1)
 
     # Calculate default context size if not provided
     context_size = (
@@ -372,11 +466,28 @@ def main():  # pylint: disable=too-many-locals
         )
         sys.exit(1)
 
-    # Read SRT content from stdin
-    srt_content = sys.stdin.read()
-    if not srt_content.strip():
-        print("Error: No input provided via stdin", file=sys.stderr)
-        sys.exit(1)
+    # Read SRT content from video file or stdin
+    if args.video:
+        # Extract from video file
+        try:
+            print(
+                f"Extracting subtitles from: {args.video} "
+                f"(stream {args.track_index})",
+                file=sys.stderr
+            )
+            srt_content = extract_subtitles_from_video(
+                args.video,
+                args.track_index
+            )
+        except (FileNotFoundError, RuntimeError) as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        # Read from stdin (original behavior)
+        srt_content = sys.stdin.read()
+        if not srt_content.strip():
+            print("Error: No input provided via stdin", file=sys.stderr)
+            sys.exit(1)
 
     # Parse SRT
     entries = parse_srt(srt_content)

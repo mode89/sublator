@@ -18,6 +18,8 @@ from sublator import (
     translate_batch,
     invoke_model,
     build_arg_parser,
+    parse_translation_response,
+    validate_indices,
 )
 
 
@@ -168,12 +170,132 @@ def test_format_empty_list():
     assert output == ""
 
 
+# Translation Response Parsing Tests
+
+def test_parse_translation_response_success():
+    """Test parsing valid response with indices."""
+    response = "1\nTranslated one\n---\n2\nTranslated two\n---\n3\nTranslated three"
+    parsed = parse_translation_response(response, 3)
+
+    assert len(parsed) == 3
+    assert parsed[0] == (1, "Translated one")
+    assert parsed[1] == (2, "Translated two")
+    assert parsed[2] == (3, "Translated three")
+
+
+def test_parse_translation_response_multiline():
+    """Test parsing response with multiline text."""
+    response = "1\nLine 1\nLine 2\n---\n2\nSingle line"
+    parsed = parse_translation_response(response, 2)
+
+    assert len(parsed) == 2
+    assert parsed[0] == (1, "Line 1\nLine 2")
+    assert parsed[1] == (2, "Single line")
+
+
+def test_parse_translation_response_invalid_index():
+    """Test parsing response with non-numeric index."""
+    response = "abc\nTranslated text"
+
+    with pytest.raises(ValueError, match="invalid index"):
+        parse_translation_response(response, 1)
+
+
+def test_parse_translation_response_negative_index():
+    """Test parsing response with negative index."""
+    response = "-1\nTranslated text"
+
+    with pytest.raises(ValueError, match="invalid index: -1"):
+        parse_translation_response(response, 1)
+
+
+def test_parse_translation_response_zero_index():
+    """Test parsing response with zero index."""
+    response = "0\nTranslated text"
+
+    with pytest.raises(ValueError, match="invalid index: 0"):
+        parse_translation_response(response, 1)
+
+
+def test_parse_translation_response_missing_index():
+    """Test parsing response with only text, no index."""
+    response = "Just translated text without index"
+
+    with pytest.raises(ValueError, match="invalid index"):
+        parse_translation_response(response, 1)
+
+
+def test_parse_translation_response_empty_text():
+    """Test parsing response with index but no text."""
+    response = "1\n---\n2\nSome text"
+    parsed = parse_translation_response(response, 2)
+
+    assert len(parsed) == 2
+    assert parsed[0] == (1, "")  # Empty text is allowed
+    assert parsed[1] == (2, "Some text")
+
+
+# Index Validation Tests
+
+def test_validate_indices_success():
+    """Test validation with perfect sequence."""
+    is_valid, error_msg = validate_indices(3, [1, 2, 3])
+
+    assert is_valid is True
+    assert error_msg == ""
+
+
+def test_validate_indices_out_of_order():
+    """Test validation with out-of-order indices (should still be valid)."""
+    is_valid, error_msg = validate_indices(3, [3, 1, 2])
+
+    assert is_valid is True
+    assert error_msg == ""
+
+
+def test_validate_indices_missing():
+    """Test detection of missing indices."""
+    is_valid, error_msg = validate_indices(4, [1, 2, 4])
+
+    assert is_valid is False
+    assert "Missing indices" in error_msg
+    assert "3" in error_msg
+
+
+def test_validate_indices_extra():
+    """Test detection of extra indices."""
+    is_valid, error_msg = validate_indices(2, [1, 2, 3])
+
+    assert is_valid is False
+    assert "Extra indices" in error_msg
+    assert "3" in error_msg
+
+
+def test_validate_indices_duplicates():
+    """Test detection of duplicate indices."""
+    is_valid, error_msg = validate_indices(3, [1, 2, 2, 3])
+
+    assert is_valid is False
+    assert "Duplicate indices" in error_msg
+    assert "2" in error_msg
+
+
+def test_validate_indices_missing_multiple():
+    """Test detection of multiple missing indices."""
+    is_valid, error_msg = validate_indices(5, [1, 3, 5])
+
+    assert is_valid is False
+    assert "Missing indices" in error_msg
+    assert "2" in error_msg
+    assert "4" in error_msg
+
+
 # Batch Translation Tests
 
 @patch("sublator.invoke_model")
 def test_translate_batch_success(mock_invoke):
     """Test successful batch translation."""
-    mock_invoke.return_value = "Spanish 1\n---\nSpanish 2\n---\nSpanish 3"
+    mock_invoke.return_value = "1\nSpanish 1\n---\n2\nSpanish 2\n---\n3\nSpanish 3"
 
     texts = ["English 1", "English 2", "English 3"]
     translations = translate_batch(texts, "Spanish", "test-model", "test-key")
@@ -193,17 +315,17 @@ def test_translate_batch_success(mock_invoke):
 
 @patch("sublator.invoke_model")
 @patch("sublator.sleep")
-def test_translate_batch_count_mismatch(mock_sleep, mock_invoke):
-    """Test handling of count mismatch in translations."""
-    # Mock returns wrong count first, then correct count on retry
+def test_translate_batch_index_mismatch(mock_sleep, mock_invoke):
+    """Test handling of index mismatch in translations."""
+    # Mock returns missing index first, then correct indices on retry
     mock_invoke.side_effect = [
-        "Spanish 1\n---\nSpanish 2",  # Wrong count (2 instead of 3)
-        "Spanish 1\n---\nSpanish 2\n---\nSpanish 3"  # Correct count
+        "1\nSpanish 1\n---\n3\nSpanish 3",  # Missing index 2
+        "1\nSpanish 1\n---\n2\nSpanish 2\n---\n3\nSpanish 3"  # Correct
     ]
 
     texts = ["English 1", "English 2", "English 3"]
 
-    # Should retry until correct count
+    # Should retry until correct indices
     translations = translate_batch(texts, "Spanish", "test-model", "test-key")
 
     assert len(translations) == 3
@@ -214,7 +336,7 @@ def test_translate_batch_count_mismatch(mock_sleep, mock_invoke):
 @patch("sublator.invoke_model")
 def test_translate_batch_preserves_multi_line(mock_invoke):
     """Test that multi-line subtitles are preserved."""
-    mock_invoke.return_value = "Spanish line 1\nSpanish line 2"
+    mock_invoke.return_value = "1\nSpanish line 1\nSpanish line 2"
 
     texts = ["English line 1\nEnglish line 2"]
     translations = translate_batch(texts, "Spanish", "test-model", "test-key")
@@ -226,7 +348,7 @@ def test_translate_batch_preserves_multi_line(mock_invoke):
 @patch("sublator.invoke_model")
 def test_translate_batch_includes_context(mock_invoke):
     """Test that context entries are embedded in the prompt."""
-    mock_invoke.return_value = "Translated 1\n---\nTranslated 2"
+    mock_invoke.return_value = "1\nTranslated 1\n---\n2\nTranslated 2"
 
     texts = ["English 1", "English 2"]
     context_entries = [("Prev 1", "Prev T1"), ("Prev 2", "Prev T2")]
@@ -237,23 +359,22 @@ def test_translate_batch_includes_context(mock_invoke):
 
     assert translations == ["Translated 1", "Translated 2"]
     prompt = mock_invoke.call_args[0][1]
-    assert "Here are 2 previous subtitles" in prompt
+    # Verify context is included in prompt
     for original, translated in context_entries:
         assert f"{original}\n===\n{translated}" in prompt
-    assert "Now translate the following 2 NEW subtitles" in prompt
 
 
 @patch("sublator.invoke_model")
 @patch("sublator.sleep")
 def test_translate_batch_max_retries_exceeded(mock_sleep, mock_invoke):
-    """Test that translate_batch raises after max retries on count mismatch."""
-    mock_invoke.return_value = "Only one translation"
+    """Test that translate_batch raises after max retries on index mismatch."""
+    mock_invoke.return_value = "1\nOnly one translation"  # Missing index 2
 
     texts = ["English 1", "English 2"]
 
     with pytest.raises(
         RuntimeError,
-        match="Failed to produce 2 translations after 3 attempts"
+        match="Failed to translate 2 entries after 3 attempts"
     ):
         with patch("sublator.MAX_TRANSLATE_RETRIES", 3):
             translate_batch(
@@ -342,7 +463,7 @@ def test_default_model():
     args = parser.parse_args(["--lang", "Spanish"])
 
     assert args.model == "google/gemini-2.5-flash-preview-09-2025"
-    assert args.batch_size == 100
+    assert args.batch_size == 50
 
 
 def test_custom_model_and_batch_size():
@@ -391,7 +512,7 @@ subtitle text
 @patch("sublator.invoke_model")
 def test_translate_batch_with_context(mock_invoke):
     """Test batch translation with context entries."""
-    mock_invoke.return_value = "Spanish 3\n---\nSpanish 4"
+    mock_invoke.return_value = "1\nSpanish 3\n---\n2\nSpanish 4"
 
     texts = ["English 3", "English 4"]
     context = [("English 1", "Spanish 1"), ("English 2", "Spanish 2")]
@@ -410,14 +531,13 @@ def test_translate_batch_with_context(mock_invoke):
     assert "English 1" in prompt
     assert "Spanish 1" in prompt
     assert "===" in prompt
-    assert "DO NOT translate" in prompt
-    assert "context" in prompt.lower()
+    assert "context" in prompt.lower() or "Previous" in prompt
 
 
 @patch("sublator.invoke_model")
 def test_translate_batch_without_context(mock_invoke):
     """Test batch translation without context (backward compatibility)."""
-    mock_invoke.return_value = "Spanish 1\n---\nSpanish 2"
+    mock_invoke.return_value = "1\nSpanish 1\n---\n2\nSpanish 2"
 
     texts = ["English 1", "English 2"]
     translations = translate_batch(
@@ -431,14 +551,14 @@ def test_translate_batch_without_context(mock_invoke):
     # Verify prompt does NOT contain context markers
     call_args = mock_invoke.call_args
     prompt = call_args[0][1]
-    assert "context" not in prompt.lower()
+    assert "Previous" not in prompt
     assert "===" not in prompt
 
 
 @patch("sublator.invoke_model")
 def test_translate_batch_with_empty_context(mock_invoke):
     """Test batch translation with empty context list."""
-    mock_invoke.return_value = "Spanish 1\n---\nSpanish 2"
+    mock_invoke.return_value = "1\nSpanish 1\n---\n2\nSpanish 2"
 
     texts = ["English 1", "English 2"]
     translations = translate_batch(
@@ -482,7 +602,7 @@ def test_context_size_calculations():
 @patch("sublator.invoke_model")
 def test_translate_batch_multiline_with_context(mock_invoke):
     """Test that multi-line subtitles work correctly with context."""
-    mock_invoke.return_value = "Spanish multi\nline 2"
+    mock_invoke.return_value = "1\nSpanish multi\nline 2"
 
     texts = ["English multi\nline 2"]
     context = [("English line 1", "Spanish line 1")]

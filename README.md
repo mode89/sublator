@@ -4,13 +4,13 @@ Translate SRT subtitle files using LLMs via OpenRouter API.
 
 ## Features
 
-- Batch translation for efficiency (100 subtitles per batch)
+- Batch translation for efficiency (50 subtitles per batch)
 - Context-aware translation (includes previous translations for consistency)
 - Support for any language
 - Stdin/stdout interface for Unix pipelines
 - Configurable LLM models
 - Automatic retry on API failures
-- Smart retry on output count mismatches
+- Smart validation with index-based retry (detects missing, extra, or duplicate entries)
 - No external dependencies (Python standard library only)
 
 ## Requirements
@@ -36,7 +36,7 @@ cat input.srt | ./sublator.py --lang Spanish > output.srt
 
 - `-l, --lang` (required): Target language
 - `-m, --model` (optional): LLM model (default: `google/gemini-2.5-flash-preview-09-2025`)
-- `--batch-size` (optional): Subtitles per batch (default: 100)
+- `--batch-size` (optional): Subtitles per batch (default: 50)
 - `--context-size` (optional): Number of previous translations to include as context (default: batch size)
 
 ### Examples

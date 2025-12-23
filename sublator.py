@@ -125,6 +125,99 @@ def invoke_model(model: str, prompt: str, api_key: str) -> str:
     raise RuntimeError("Failed to get response from model after 5 tries.")
 
 
+def parse_translation_response(
+    response: str,
+    expected_count: int
+) -> List[Tuple[int, str]]:
+    """
+    Parse model response into (index, translated_text) pairs.
+
+    Args:
+        response: Model response with format "index\ntext\n---\nindex\ntext..."
+        expected_count: Expected number of entries (for error messages)
+
+    Returns:
+        List of (index, translated_text) tuples
+
+    Raises:
+        ValueError: If response format is invalid
+    """
+    blocks = response.split("\n---\n")
+    parsed_entries = []
+
+    for i, block in enumerate(blocks):
+        block = block.strip()
+        if not block:
+            continue
+
+        lines = block.split("\n", 1)  # Split into first line and rest
+
+        if len(lines) < 1:
+            raise ValueError(
+                f"Entry {i+1} is empty or malformed"
+            )
+
+        index_line = lines[0].strip()
+        text_content = lines[1].strip() if len(lines) > 1 else ""
+
+        # Parse index as integer
+        try:
+            index = int(index_line)
+        except ValueError as e:
+            raise ValueError(
+                f"Entry {i+1} has invalid index: '{index_line}'. "
+                f"Expected a number. Error: {e}"
+            ) from e
+
+        # Validate index is positive
+        if index <= 0:
+            raise ValueError(
+                f"Entry {i+1} has invalid index: {index}. "
+                "Expected a positive integer (1, 2, 3, ...)"
+            )
+
+        parsed_entries.append((index, text_content))
+
+    return parsed_entries
+
+
+def validate_indices(
+    expected_count: int,
+    response_indices: List[int]
+) -> Tuple[bool, str]:
+    """
+    Validate that response indices form a complete sequence 1..N.
+
+    Args:
+        expected_count: Expected number of entries (N)
+        response_indices: List of indices from model response
+
+    Returns:
+        (is_valid, error_message) tuple
+    """
+    expected_set = set(range(1, expected_count + 1))
+    response_set = set(response_indices)
+
+    # Check for missing indices
+    missing = expected_set - response_set
+    if missing:
+        return False, f"Missing indices: {sorted(missing)}"
+
+    # Check for extra indices
+    extra = response_set - expected_set
+    if extra:
+        return False, f"Extra indices found: {sorted(extra)}"
+
+    # Check for duplicates in response
+    if len(response_indices) != len(response_set):
+        from collections import Counter
+        counts = Counter(response_indices)
+        duplicates = [idx for idx, count in counts.items() if count > 1]
+        return False, f"Duplicate indices in response: {sorted(duplicates)}"
+
+    return True, ""
+
+
 def translate_batch(
     texts: List[str],
     target_language: str,
@@ -146,8 +239,10 @@ def translate_batch(
     Returns:
         List of translated texts
     """
-    # Join texts with separator
-    joined_texts = "\n---\n".join(texts)
+    # Join texts with indices and separator
+    entries_with_indices = [f"{i+1}\n{text}" for i, text in enumerate(texts)]
+    joined_texts = "\n---\n".join(entries_with_indices)
+    expected_count = len(texts)
 
     # Construct prompt with optional context
     if context_entries and len(context_entries) > 0:
@@ -157,58 +252,64 @@ def translate_batch(
             context_parts.append(f"{original}\n===\n{translated}")
         context_text = "\n---\n".join(context_parts)
 
-        prompt = (
-            f"Here are {len(context_entries)} previous subtitles for "
-            "context (DO NOT translate these - they are already "
-            f"translated to {target_language} for your reference only):\n\n"
-            f"{context_text}\n\n"
-            f"Now translate the following {len(texts)} NEW subtitles to "
-            f"{target_language}. "
-            'Each subtitle is separated by "---". '
-            f"You MUST output exactly {len(texts)} translations. "
-            'Use "---" as separator in your response. '
-            f"IMPORTANT: Output ONLY the {len(texts)} new translations below "
-            "(NOT the context above):\n\n"
-            f"{joined_texts}"
+        prompt = PROMPT_WITH_CONTEXT.format(
+            target_language=target_language,
+            previous_translations=context_text,
+            batch=joined_texts,
         )
     else:
-        prompt = (
-            f"Translate the following subtitles to {target_language}. "
-            'Each subtitle is separated by "---". '
-            "Maintain the same number of subtitles and "
-            'use "---" as separator in your response. '
-            "Output only the translated subtitles:\n\n"
-            f"{joined_texts}"
+        prompt = PROMPT.format(
+            target_language=target_language,
+            batch=joined_texts,
         )
 
     for attempt in range(MAX_TRANSLATE_RETRIES):
         # Get translation
         response = invoke_model(model, prompt, api_key)
 
-        # Split response by separator
-        translations = response.split("\n---\n")
+        try:
+            # Parse response with indices
+            parsed_response = parse_translation_response(
+                response, expected_count
+            )
+            response_indices = [idx for idx, _ in parsed_response]
 
-        # Validate count
-        if len(translations) == len(texts):
-            return translations
+            # Validate indices
+            is_valid, error_msg = validate_indices(
+                expected_count, response_indices
+            )
 
-        print(
-            f"Warning: Expected {len(texts)} translations "
-            f"but got {len(translations)}",
-            file=sys.stderr
-        )
+            if is_valid:
+                # Sort by index to ensure correct order
+                parsed_response.sort(key=lambda x: x[0])
+                translations = [text for _, text in parsed_response]
+                return translations
+
+            print(
+                f"Warning: Index validation failed: {error_msg}",
+                file=sys.stderr
+            )
+
+        except ValueError as e:
+            print(
+                f"Warning: Failed to parse response: {e}",
+                file=sys.stderr
+            )
+            error_msg = str(e)
+
         if attempt < MAX_TRANSLATE_RETRIES - 1:
             print(
-                f"Retrying translation (attempt {attempt + 1})...",
+                f"Retrying translation "
+                f"(attempt {attempt + 1}/{MAX_TRANSLATE_RETRIES})...",
                 file=sys.stderr
             )
             sleep(1.0)
-        else:
-            break
 
+    # All retries failed
     raise RuntimeError(
-        f"Failed to produce {len(texts)} translations after "
-        f"{MAX_TRANSLATE_RETRIES} attempts."
+        f"Failed to translate {len(texts)} entries after "
+        f"{MAX_TRANSLATE_RETRIES} attempts. "
+        f"Last error: {error_msg if 'error_msg' in locals() else 'Unknown'}"
     )
 
 
@@ -336,6 +437,80 @@ def main():  # pylint: disable=too-many-locals
         f"Translation complete! Processed {total_entries} subtitles.",
         file=sys.stderr
     )
+
+PROMPT = """
+You are a professional subtitle translator. Your task is to translate movie subtitles from their original language into {target_language}.
+
+## Instructions
+
+1. **Translate each subtitle entry** in the batch below into {target_language}
+2. **Maintain the exact format**: Each entry should have its index number on the first line and the translated text on subsequent lines
+3. **Separate entries** with `---` exactly as in the input
+4. **Establish consistency**: Since this is the beginning of the movie, pay special attention to how you translate character names, locations, and recurring terms, as these translations will set the standard for subsequent batches
+
+   Example format:
+   1
+   Translated text here
+   ---
+   2
+   More translated text
+
+## Translation Guidelines
+
+- **Natural and idiomatic**: Translate for meaning and natural flow, not word-for-word
+- **Subtitle constraints**: Keep translations concise and readable within typical subtitle timing
+- **Cultural adaptation**: Adapt idioms, jokes, and cultural references appropriately for the target audience
+- **Character consistency**: Maintain consistent terminology for character names, locations, and recurring phrases
+- **Tone and register**: Preserve the emotional tone, formality level, and speaking style of each character
+- **Technical terms**: Keep proper nouns, brand names, and technical terms consistent with established conventions
+
+## Batch to Translate
+
+{batch}
+
+## Your Task
+
+Translate the above subtitle batch into {target_language} now, maintaining the exact format with index numbers and `---` separators.
+"""
+
+PROMPT_WITH_CONTEXT = """
+You are a professional subtitle translator. Your task is to translate movie subtitles from their original language into {target_language}.
+
+## Instructions
+
+1. **Translate each subtitle entry** in the batch below into {target_language}
+2. **Maintain the exact format**: Each entry should have its index number on the first line and the translated text on subsequent lines
+3. **Separate entries** with `---` exactly as in the input
+4. **Ensure continuity**: Use the previous translations provided as context to maintain consistency in terminology, character names, and tone throughout the movie
+
+   Example format:
+   1
+   Translated text here
+   ---
+   2
+   More translated text
+
+## Translation Guidelines
+
+- **Natural and idiomatic**: Translate for meaning and natural flow, not word-for-word
+- **Subtitle constraints**: Keep translations concise and readable within typical subtitle timing
+- **Cultural adaptation**: Adapt idioms, jokes, and cultural references appropriately for the target audience
+- **Character consistency**: Maintain consistent terminology for character names, locations, and recurring phrases
+- **Tone and register**: Preserve the emotional tone, formality level, and speaking style of each character
+- **Technical terms**: Keep proper nouns, brand names, and technical terms consistent with established conventions
+
+## Previous Translations (for context)
+
+{previous_translations}
+
+## Current Batch to Translate
+
+{batch}
+
+## Your Task
+
+Translate the above subtitle batch into {target_language} now, maintaining the exact format with index numbers and `---` separators.
+"""
 
 
 if __name__ == "__main__":

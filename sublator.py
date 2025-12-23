@@ -79,6 +79,94 @@ def extract_subtitles_from_video(
         ) from e
 
 
+def list_subtitle_streams(video_path: str) -> None:
+    """
+    List all available subtitle streams in a video file using ffprobe.
+
+    Args:
+        video_path: Path to the video file
+
+    Raises:
+        FileNotFoundError: If video file doesn't exist
+        RuntimeError: If ffprobe is not available or fails
+    """
+    # Check if video file exists
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    # Check if ffprobe is available
+    try:
+        subprocess.run(
+            ["ffprobe", "-version"],
+            capture_output=True,
+            check=True,
+            text=True
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        raise RuntimeError(
+            "ffprobe is not installed or not accessible. "
+            "Please install ffmpeg to use video subtitle extraction."
+        ) from e
+
+    # Get stream information using ffprobe
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_streams",
+                video_path
+            ],
+            capture_output=True,
+            check=True,
+            text=True
+        )
+    except subprocess.CalledProcessError as e:
+        error_output = e.stderr if e.stderr else "Unknown error"
+        raise RuntimeError(
+            f"Failed to probe video file: {error_output}"
+        ) from e
+
+    # Parse JSON output
+    try:
+        import json
+        data = json.loads(result.stdout)
+        streams = data.get("streams", [])
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Failed to parse ffprobe output: {e}"
+        ) from e
+
+    # Filter for subtitle streams
+    subtitle_streams = [
+        s for s in streams if s.get("codec_type") == "subtitle"
+    ]
+
+    if not subtitle_streams:
+        print(f"No subtitle streams found in {video_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Print header
+    print(f"Available subtitle streams in {video_path}:")
+
+    # Print each stream
+    for stream in subtitle_streams:
+        index = stream.get("index", "?")
+        codec = stream.get("codec_name", "unknown")
+        tags = stream.get("tags", {})
+        lang = tags.get("language", "unknown")
+        title = tags.get("title", "")
+
+        # Format: Stream 5: Blu-ray CEE (Russian, subrip)
+        parts = [f"Stream {index}:"]
+        if title:
+            parts.append(title)
+        parts.append(f"({lang}, {codec})")
+
+        print(f"  {' '.join(parts)}")
+
+
 def parse_srt(srt_content: str) -> List[Tuple[str, str, str]]:
     """
     Parse SRT content into a list of subtitle entries.
@@ -384,7 +472,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-l", "--lang",
-        required=True,
+        default=None,
         help="Target language (e.g., Spanish, French, Japanese)"
     )
     parser.add_argument(
@@ -423,7 +511,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         help=(
             "Subtitle stream index to extract from video. "
-            "Required when using --video."
+            "If not provided with --video, lists available streams and exits."
         )
     )
 
@@ -435,18 +523,35 @@ def main():  # pylint: disable=too-many-locals
     parser = build_arg_parser()
     args = parser.parse_args()
 
-    # Validate that --video requires --stream-index
-    if args.video is not None and args.track_index is None:
-        print(
-            "Error: --video requires --stream-index",
-            file=sys.stderr
-        )
-        sys.exit(1)
-
     # Validate that --stream-index requires --video
     if args.track_index is not None and args.video is None:
         print(
             "Error: --stream-index requires --video",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
+    # If --video is provided without --stream-index, list streams and exit
+    if args.video is not None and args.track_index is None:
+        try:
+            list_subtitle_streams(args.video)
+        except (FileNotFoundError, RuntimeError) as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
+
+    # If --video and --stream-index are provided, --lang is required
+    if args.video is not None and args.track_index is not None and args.lang is None:
+        print(
+            "Error: --lang is required when extracting and translating subtitles",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
+    # For non-video mode, --lang is required
+    if args.video is None and args.lang is None:
+        print(
+            "Error: --lang is required",
             file=sys.stderr
         )
         sys.exit(1)

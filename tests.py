@@ -812,29 +812,118 @@ def test_stream_index_without_video():
     assert args.track_index == 3  # Parsing succeeds, validation happens in main()
 
 
-@patch("sublator.sys.exit")
-def test_video_requires_stream_index(mock_exit):
-    """Test that --video requires --stream-index."""
-    from sublator import build_arg_parser, main
-    import io
+@patch("sublator.os.path.exists")
+@patch("sublator.subprocess.run")
+def test_list_subtitle_streams_success(mock_run, mock_exists, capsys):
+    """Test successful listing of subtitle streams."""
+    import json
+    from sublator import list_subtitle_streams
 
-    parser = build_arg_parser()
-    args = parser.parse_args(["--lang", "Spanish", "--video", "movie.mkv"])
+    mock_exists.return_value = True
 
-    # Mock sys.stderr to capture error output
-    old_stderr = sys.stderr
-    sys.stderr = io.StringIO()
+    # Mock ffprobe version check
+    mock_version_result = Mock()
+    mock_version_result.returncode = 0
+    mock_version_result.stdout = "ffprobe version 6.0.0"
 
-    # Call the validation portion of main by manually setting up
-    # We'll test this by simulating the validation logic
-    if args.video is not None and args.track_index is None:
-        print("Error: --video requires --stream-index", file=sys.stderr)
-        # The actual main() would call sys.exit(1) here
+    # Mock ffprobe streams output
+    streams_data = {
+        "streams": [
+            {
+                "index": 0,
+                "codec_type": "video",
+                "codec_name": "h264"
+            },
+            {
+                "index": 1,
+                "codec_type": "audio",
+                "codec_name": "aac"
+            },
+            {
+                "index": 2,
+                "codec_type": "subtitle",
+                "codec_name": "subrip",
+                "tags": {
+                    "language": "eng",
+                    "title": "English Subtitles"
+                }
+            },
+            {
+                "index": 3,
+                "codec_type": "subtitle",
+                "codec_name": "subrip",
+                "tags": {
+                    "language": "spa",
+                    "title": "Spanish Subtitles"
+                }
+            }
+        ]
+    }
 
-    error_output = sys.stderr.getvalue()
-    sys.stderr = old_stderr
+    mock_streams_result = Mock()
+    mock_streams_result.returncode = 0
+    mock_streams_result.stdout = json.dumps(streams_data)
 
-    assert "--video requires --stream-index" in error_output
+    mock_run.side_effect = [mock_version_result, mock_streams_result]
+
+    list_subtitle_streams("test.mkv")
+
+    captured = capsys.readouterr()
+    assert "Available subtitle streams in test.mkv:" in captured.out
+    assert "Stream 2: English Subtitles (eng, subrip)" in captured.out
+    assert "Stream 3: Spanish Subtitles (spa, subrip)" in captured.out
+
+
+@patch("sublator.os.path.exists")
+@patch("sublator.subprocess.run")
+def test_list_subtitle_streams_no_subtitles(mock_run, mock_exists, capsys):
+    """Test listing streams when video has no subtitles."""
+    import json
+    from sublator import list_subtitle_streams
+
+    mock_exists.return_value = True
+
+    mock_version_result = Mock()
+    mock_version_result.returncode = 0
+    mock_version_result.stdout = "ffprobe version 6.0.0"
+
+    streams_data = {
+        "streams": [
+            {
+                "index": 0,
+                "codec_type": "video",
+                "codec_name": "h264"
+            },
+            {
+                "index": 1,
+                "codec_type": "audio",
+                "codec_name": "aac"
+            }
+        ]
+    }
+
+    mock_streams_result = Mock()
+    mock_streams_result.returncode = 0
+    mock_streams_result.stdout = json.dumps(streams_data)
+
+    mock_run.side_effect = [mock_version_result, mock_streams_result]
+
+    with pytest.raises(SystemExit):
+        list_subtitle_streams("no_subs.mkv")
+
+    captured = capsys.readouterr()
+    assert "No subtitle streams found" in captured.err
+
+
+@patch("sublator.os.path.exists")
+def test_list_subtitle_streams_file_not_found(mock_exists, capsys):
+    """Test FileNotFoundError when video file doesn't exist."""
+    from sublator import list_subtitle_streams
+
+    mock_exists.return_value = False
+
+    with pytest.raises(FileNotFoundError, match="Video file not found"):
+        list_subtitle_streams("nonexistent.mkv")
 
 
 @patch("sublator.sys.exit")

@@ -17,7 +17,7 @@ Translate SRT subtitle files using LLMs via OpenRouter API.
 
 - Python 3.6+
 - OpenRouter API key
-- ffmpeg (required for --video option)
+- ffmpeg/ffprobe (required for --video option)
 
 ## Setup
 
@@ -35,12 +35,12 @@ cat input.srt | ./sublator.py --lang Spanish > output.srt
 
 ### Options
 
-- `-l, --lang` (required): Target language
+- `-l, --lang` (required for translation): Target language
 - `-m, --model` (optional): LLM model (default: `google/gemini-2.5-flash-preview-09-2025`)
 - `--batch-size` (optional): Subtitles per batch (default: 50)
 - `--context-size` (optional): Number of previous translations to include as context (default: batch size)
-- `--video` (optional): Path to video file to extract subtitles from (requires --stream-index)
-- `--stream-index` (optional): Subtitle stream index to extract (required when using --video)
+- `--video` (optional): Path to video file to extract subtitles from
+- `--stream-index` (optional): Subtitle stream index to extract. If not provided with `--video`, lists available streams and exits.
 
 ### Examples
 
@@ -57,11 +57,11 @@ cat video.srt | ./sublator.py --lang Spanish --batch-size 50 > video.es.srt
 # Adjust context size for better consistency
 cat series.srt | ./sublator.py --lang German --context-size 75 > series.de.srt
 
-# Extract and translate from video file (stream 0)
-./sublator.py --video movie.mkv --stream-index 0 --lang Spanish > output.srt
+# List available subtitle streams in a video file (no --lang needed)
+./sublator.py --video movie.mkv
 
-# Extract from specific subtitle stream (e.g., second subtitle stream)
-./sublator.py --video movie.mkv --stream-index 1 --lang French > output.srt
+# Extract and translate from video file (using stream index from listing)
+./sublator.py --video movie.mkv --stream-index 5 --lang Spanish > output.srt
 ```
 
 ## Testing

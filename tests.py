@@ -17,11 +17,12 @@ from sublator import (
     parse_srt,
     format_srt,
     translate_batch,
-    invoke_model,
+    make_invoke_model,
     build_arg_parser,
     parse_translation_response,
     validate_indices,
     extract_subtitles_from_video,
+    PROVIDER_CONFIGS,
 )
 
 
@@ -294,83 +295,76 @@ def test_validate_indices_missing_multiple():
 
 # Batch Translation Tests
 
-@patch("sublator.invoke_model")
-def test_translate_batch_success(mock_invoke):
+def test_translate_batch_success():
     """Test successful batch translation."""
-    mock_invoke.return_value = "1\nSpanish 1\n---\n2\nSpanish 2\n---\n3\nSpanish 3"
+    mock_invoke = Mock(return_value="1\nSpanish 1\n---\n2\nSpanish 2\n---\n3\nSpanish 3")
 
     texts = ["English 1", "English 2", "English 3"]
-    translations = translate_batch(texts, "Spanish", "test-model", "test-key")
+    translations = translate_batch(texts, "Spanish", mock_invoke)
 
     assert len(translations) == 3
     assert translations[0] == "Spanish 1"
     assert translations[1] == "Spanish 2"
     assert translations[2] == "Spanish 3"
 
-    # Verify invoke_model was called correctly
+    # Verify invoke was called correctly
     mock_invoke.assert_called_once()
     call_args = mock_invoke.call_args
-    assert call_args[0][0] == "test-model"  # model
-    assert "Spanish" in call_args[0][1]  # prompt contains target language
-    assert call_args[0][2] == "test-key"  # api_key
+    assert "Spanish" in call_args[0][0]  # prompt contains target language
 
 
-@patch("sublator.invoke_model")
 @patch("sublator.sleep")
-def test_translate_batch_index_mismatch(mock_sleep, mock_invoke):
+def test_translate_batch_index_mismatch(mock_sleep):
     """Test handling of index mismatch in translations."""
     # Mock returns missing index first, then correct indices on retry
-    mock_invoke.side_effect = [
+    mock_invoke = Mock(side_effect=[
         "1\nSpanish 1\n---\n3\nSpanish 3",  # Missing index 2
         "1\nSpanish 1\n---\n2\nSpanish 2\n---\n3\nSpanish 3"  # Correct
-    ]
+    ])
 
     texts = ["English 1", "English 2", "English 3"]
 
     # Should retry until correct indices
-    translations = translate_batch(texts, "Spanish", "test-model", "test-key")
+    translations = translate_batch(texts, "Spanish", mock_invoke)
 
     assert len(translations) == 3
     assert mock_invoke.call_count == 2  # Called twice due to retry
     assert mock_sleep.call_count == 1  # Slept once between retries
 
 
-@patch("sublator.invoke_model")
-def test_translate_batch_preserves_multi_line(mock_invoke):
+def test_translate_batch_preserves_multi_line():
     """Test that multi-line subtitles are preserved."""
-    mock_invoke.return_value = "1\nSpanish line 1\nSpanish line 2"
+    mock_invoke = Mock(return_value="1\nSpanish line 1\nSpanish line 2")
 
     texts = ["English line 1\nEnglish line 2"]
-    translations = translate_batch(texts, "Spanish", "test-model", "test-key")
+    translations = translate_batch(texts, "Spanish", mock_invoke)
 
     assert len(translations) == 1
     assert "\n" in translations[0]  # Multi-line preserved
 
 
-@patch("sublator.invoke_model")
-def test_translate_batch_includes_context(mock_invoke):
+def test_translate_batch_includes_context():
     """Test that context entries are embedded in the prompt."""
-    mock_invoke.return_value = "1\nTranslated 1\n---\n2\nTranslated 2"
+    mock_invoke = Mock(return_value="1\nTranslated 1\n---\n2\nTranslated 2")
 
     texts = ["English 1", "English 2"]
     context_entries = [("Prev 1", "Prev T1"), ("Prev 2", "Prev T2")]
 
     translations = translate_batch(
-        texts, "Spanish", "test-model", "test-key", context_entries
+        texts, "Spanish", mock_invoke, context_entries
     )
 
     assert translations == ["Translated 1", "Translated 2"]
-    prompt = mock_invoke.call_args[0][1]
+    prompt = mock_invoke.call_args[0][0]
     # Verify context is included in prompt
     for original, translated in context_entries:
         assert f"{original}\n===\n{translated}" in prompt
 
 
-@patch("sublator.invoke_model")
 @patch("sublator.sleep")
-def test_translate_batch_max_retries_exceeded(mock_sleep, mock_invoke):
+def test_translate_batch_max_retries_exceeded(mock_sleep):
     """Test that translate_batch raises after max retries on index mismatch."""
-    mock_invoke.return_value = "1\nOnly one translation"  # Missing index 2
+    mock_invoke = Mock(return_value="1\nOnly one translation")  # Missing index 2
 
     texts = ["English 1", "English 2"]
 
@@ -379,12 +373,7 @@ def test_translate_batch_max_retries_exceeded(mock_sleep, mock_invoke):
         match="Failed to translate 2 entries after 3 attempts"
     ):
         with patch("sublator.MAX_TRANSLATE_RETRIES", 3):
-            translate_batch(
-                texts,
-                "Spanish",
-                "test-model",
-                "test-key"
-            )
+            translate_batch(texts, "Spanish", mock_invoke)
 
     assert mock_invoke.call_count == 3
     assert mock_sleep.call_count == 2  # Sleeps between attempts, not after last
@@ -393,8 +382,8 @@ def test_translate_batch_max_retries_exceeded(mock_sleep, mock_invoke):
 # API Invocation Tests
 
 @patch("sublator.urlopen")
-def test_invoke_model_success(mock_urlopen):
-    """Test successful API invocation."""
+def test_make_invoke_model_success(mock_urlopen):
+    """Test successful API invocation via make_invoke_model."""
     # Mock successful response
     mock_response = MagicMock()
     mock_response.read.return_value = json.dumps({
@@ -411,7 +400,8 @@ def test_invoke_model_success(mock_urlopen):
 
     mock_urlopen.return_value = mock_response
 
-    result = invoke_model("test-model", "Test prompt", "test-key")
+    invoke = make_invoke_model("test-model", "test-key", "https://api.example.com/v1/chat")
+    result = invoke("Test prompt")
 
     assert result == "Translated text"
     mock_urlopen.assert_called_once()
@@ -419,7 +409,7 @@ def test_invoke_model_success(mock_urlopen):
 
 @patch("sublator.urlopen")
 @patch("sublator.sleep")  # Mock sleep to speed up test
-def test_invoke_model_retry_on_error(mock_sleep, mock_urlopen):
+def test_make_invoke_model_retry_on_error(mock_sleep, mock_urlopen):
     """Test retry logic on errors."""
     # First 2 calls fail, 3rd succeeds
     mock_urlopen.side_effect = [
@@ -434,7 +424,8 @@ def test_invoke_model_retry_on_error(mock_sleep, mock_urlopen):
         )
     ]
 
-    result = invoke_model("test-model", "Test prompt", "test-key")
+    invoke = make_invoke_model("test-model", "test-key", "https://api.example.com/v1/chat")
+    result = invoke("Test prompt")
 
     assert result == "Success"
     assert mock_urlopen.call_count == 3
@@ -443,15 +434,17 @@ def test_invoke_model_retry_on_error(mock_sleep, mock_urlopen):
 
 @patch("sublator.urlopen")
 @patch("sublator.sleep")
-def test_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
+def test_make_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
     """Test that RuntimeError is raised after max retries."""
     mock_urlopen.side_effect = URLError("Connection error")
+
+    invoke = make_invoke_model("test-model", "test-key", "https://api.example.com/v1/chat")
 
     with pytest.raises(
         RuntimeError,
         match="Failed to get response from model after 5 tries"
     ):
-        invoke_model("test-model", "Test prompt", "test-key")
+        invoke("Test prompt")
 
     assert mock_urlopen.call_count == 5
     assert mock_sleep.call_count == 4  # Slept 4 times (not after last attempt)
@@ -459,27 +452,76 @@ def test_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
 
 # Command-Line Interface Tests
 
-def test_default_model():
-    """Test that default model is correct."""
+def test_provider_required():
+    """Test that provider argument is required."""
     parser = build_arg_parser()
-    args = parser.parse_args(["--lang", "Spanish"])
+    import argparse
 
-    assert args.model == "google/gemini-2.5-flash-preview-09-2025"
-    assert args.batch_size == 50
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--lang", "Spanish"])
+
+
+def test_openrouter_provider():
+    """Test --openrouter flag sets provider correctly."""
+    parser = build_arg_parser()
+    args = parser.parse_args(["--openrouter", "--lang", "Spanish"])
+
+    assert args.provider == "openrouter"
+    assert args.lang == "Spanish"
+
+
+def test_zai_provider():
+    """Test --zai flag sets provider correctly."""
+    parser = build_arg_parser()
+    args = parser.parse_args(["--zai", "--lang", "Spanish"])
+
+    assert args.provider == "zai"
+    assert args.lang == "Spanish"
+
+
+def test_provider_mutually_exclusive():
+    """Test that --openrouter and --zai are mutually exclusive."""
+    parser = build_arg_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--openrouter", "--zai", "--lang", "Spanish"])
+
+
+def test_default_model_is_none():
+    """Test that default model is None (provider-specific default used)."""
+    parser = build_arg_parser()
+    args = parser.parse_args(["--openrouter", "--lang", "Spanish"])
+
+    assert args.model is None
+    assert args.batch_size == 100
 
 
 def test_custom_model_and_batch_size():
     """Test custom model and batch size arguments."""
     parser = build_arg_parser()
     args = parser.parse_args([
+        "--openrouter",
         "--lang", "French",
         "--model", "custom-model",
         "--batch-size", "50"
     ])
 
+    assert args.provider == "openrouter"
     assert args.lang == "French"
     assert args.model == "custom-model"
     assert args.batch_size == 50
+
+
+def test_provider_configs():
+    """Test that provider configs are properly defined."""
+    assert "openrouter" in PROVIDER_CONFIGS
+    assert "zai" in PROVIDER_CONFIGS
+
+    assert PROVIDER_CONFIGS["openrouter"]["env_key"] == "OPENROUTER_API_KEY"
+    assert PROVIDER_CONFIGS["zai"]["env_key"] == "ZAI_API_KEY"
+
+    assert PROVIDER_CONFIGS["openrouter"]["default_model"] == "google/gemini-2.5-flash-preview-09-2025"
+    assert PROVIDER_CONFIGS["zai"]["default_model"] == "GLM-5"
 
 
 # Round-Trip Tests
@@ -511,17 +553,14 @@ subtitle text
 
 # Context-Aware Translation Tests
 
-@patch("sublator.invoke_model")
-def test_translate_batch_with_context(mock_invoke):
+def test_translate_batch_with_context():
     """Test batch translation with context entries."""
-    mock_invoke.return_value = "1\nSpanish 3\n---\n2\nSpanish 4"
+    mock_invoke = Mock(return_value="1\nSpanish 3\n---\n2\nSpanish 4")
 
     texts = ["English 3", "English 4"]
     context = [("English 1", "Spanish 1"), ("English 2", "Spanish 2")]
 
-    translations = translate_batch(
-        texts, "Spanish", "test-model", "test-key", context
-    )
+    translations = translate_batch(texts, "Spanish", mock_invoke, context)
 
     assert len(translations) == 2
     assert translations[0] == "Spanish 3"
@@ -529,22 +568,19 @@ def test_translate_batch_with_context(mock_invoke):
 
     # Verify prompt contains context
     call_args = mock_invoke.call_args
-    prompt = call_args[0][1]
+    prompt = call_args[0][0]
     assert "English 1" in prompt
     assert "Spanish 1" in prompt
     assert "===" in prompt
     assert "context" in prompt.lower() or "Previous" in prompt
 
 
-@patch("sublator.invoke_model")
-def test_translate_batch_without_context(mock_invoke):
+def test_translate_batch_without_context():
     """Test batch translation without context (backward compatibility)."""
-    mock_invoke.return_value = "1\nSpanish 1\n---\n2\nSpanish 2"
+    mock_invoke = Mock(return_value="1\nSpanish 1\n---\n2\nSpanish 2")
 
     texts = ["English 1", "English 2"]
-    translations = translate_batch(
-        texts, "Spanish", "test-model", "test-key", None
-    )
+    translations = translate_batch(texts, "Spanish", mock_invoke, None)
 
     assert len(translations) == 2
     assert translations[0] == "Spanish 1"
@@ -552,26 +588,23 @@ def test_translate_batch_without_context(mock_invoke):
 
     # Verify prompt does NOT contain context markers
     call_args = mock_invoke.call_args
-    prompt = call_args[0][1]
+    prompt = call_args[0][0]
     assert "Previous" not in prompt
     assert "===" not in prompt
 
 
-@patch("sublator.invoke_model")
-def test_translate_batch_with_empty_context(mock_invoke):
+def test_translate_batch_with_empty_context():
     """Test batch translation with empty context list."""
-    mock_invoke.return_value = "1\nSpanish 1\n---\n2\nSpanish 2"
+    mock_invoke = Mock(return_value="1\nSpanish 1\n---\n2\nSpanish 2")
 
     texts = ["English 1", "English 2"]
-    translations = translate_batch(
-        texts, "Spanish", "test-model", "test-key", []
-    )
+    translations = translate_batch(texts, "Spanish", mock_invoke, [])
 
     assert len(translations) == 2
 
     # Verify prompt does NOT contain context markers
     call_args = mock_invoke.call_args
-    prompt = call_args[0][1]
+    prompt = call_args[0][0]
     assert "context" not in prompt.lower()
 
 
@@ -601,24 +634,21 @@ def test_context_size_calculations():
     assert len(context) == 30
 
 
-@patch("sublator.invoke_model")
-def test_translate_batch_multiline_with_context(mock_invoke):
+def test_translate_batch_multiline_with_context():
     """Test that multi-line subtitles work correctly with context."""
-    mock_invoke.return_value = "1\nSpanish multi\nline 2"
+    mock_invoke = Mock(return_value="1\nSpanish multi\nline 2")
 
     texts = ["English multi\nline 2"]
     context = [("English line 1", "Spanish line 1")]
 
-    translations = translate_batch(
-        texts, "Spanish", "test-model", "test-key", context
-    )
+    translations = translate_batch(texts, "Spanish", mock_invoke, context)
 
     assert len(translations) == 1
     assert "\n" in translations[0]
 
     # Verify context is in prompt
     call_args = mock_invoke.call_args
-    prompt = call_args[0][1]
+    prompt = call_args[0][0]
     assert "English line 1" in prompt
     assert "Spanish line 1" in prompt
 
@@ -781,7 +811,7 @@ def test_extract_subtitles_no_subtitle_stream(mock_run, mock_exists):
 def test_video_argument_defaults():
     """Test that --video and --stream-index have correct defaults."""
     parser = build_arg_parser()
-    args = parser.parse_args(["--lang", "Spanish"])
+    args = parser.parse_args(["--openrouter", "--lang", "Spanish"])
 
     assert args.video is None
     assert args.track_index is None
@@ -791,6 +821,7 @@ def test_track_index_custom():
     """Test parsing custom --stream-index."""
     parser = build_arg_parser()
     args = parser.parse_args([
+        "--openrouter",
         "--lang", "Spanish",
         "--video", "movie.mkv",
         "--stream-index", "2"
@@ -804,6 +835,7 @@ def test_stream_index_without_video():
     """Test that --stream-index requires --video."""
     parser = build_arg_parser()
     args = parser.parse_args([
+        "--openrouter",
         "--lang", "Spanish",
         "--stream-index", "3"
     ])
@@ -933,7 +965,7 @@ def test_stream_index_requires_video(mock_exit):
     import io
 
     parser = build_arg_parser()
-    args = parser.parse_args(["--lang", "Spanish", "--stream-index", "1"])
+    args = parser.parse_args(["--openrouter", "--lang", "Spanish", "--stream-index", "1"])
 
     # Mock sys.stderr to capture error output
     old_stderr = sys.stderr

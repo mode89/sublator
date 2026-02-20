@@ -13,12 +13,24 @@ import argparse
 import subprocess
 from urllib.request import urlopen, Request, HTTPError, URLError
 from time import sleep
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Callable
 
 
 MAX_TRANSLATE_RETRIES = 5
 DEFAULT_BATCH_SIZE = 100
-DEFAULT_MODEL = "google/gemini-2.5-flash-lite-preview-09-2025"
+
+PROVIDER_CONFIGS = {
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1/chat/completions",
+        "env_key": "OPENROUTER_API_KEY",
+        "default_model": "google/gemini-2.5-flash-preview-09-2025",
+    },
+    "zai": {
+        "base_url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+        "env_key": "ZAI_API_KEY",
+        "default_model": "GLM-5",
+    },
+}
 
 
 def extract_subtitles_from_video(
@@ -222,54 +234,68 @@ def format_srt(entries: List[Tuple[str, str, str]]) -> str:
     return output
 
 
-def invoke_model(model: str, prompt: str, api_key: str) -> str:
+def make_invoke_model(
+    model: str, api_key: str, base_url: str
+) -> Callable[[str], str]:
     """
-    Invoke OpenRouter API to get model response.
+    Create an invoke function with captured model, API key, and base URL.
 
     Args:
         model: Model identifier
-        prompt: User prompt
-        api_key: OpenRouter API key
+        api_key: API key for the provider
+        base_url: API endpoint URL
 
     Returns:
-        Model response content
-
-    Raises:
-        RuntimeError: If all retry attempts fail
+        A function that takes a prompt and returns the model response.
     """
-    req = Request(
-        url="https://openrouter.ai/api/v1/chat/completions",
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        data=json.dumps({
-            "model": model,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-        }).encode("utf-8"),
-    )
+    def invoke(prompt: str) -> str:
+        """
+        Invoke API to get model response.
 
-    for attempt in range(5):
-        try:
-            with urlopen(req) as res:
-                response_data = json.loads(res.read().decode("utf-8"))
-                return response_data["choices"][0]["message"]["content"]
-        except HTTPError as e:
-            msg = e.read().decode("utf-8")
-            print(f"HTTP Error {e.code}: {msg}", file=sys.stderr)
-        except URLError as e:
-            print(f"URL Error: {e.reason}", file=sys.stderr)
-        except (json.JSONDecodeError, KeyError, IndexError) as e:
-            print(f"Failed to parse response: {e}", file=sys.stderr)
+        Args:
+            prompt: User prompt
 
-        if attempt < 4:
-            print(f"Retrying ({attempt + 1}/5)...", file=sys.stderr)
-            sleep(1.0)
+        Returns:
+            Model response content
 
-    raise RuntimeError("Failed to get response from model after 5 tries.")
+        Raises:
+            RuntimeError: If all retry attempts fail
+        """
+        req = Request(
+            url=base_url,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps({
+                "model": model,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+            }).encode("utf-8"),
+        )
+
+        for attempt in range(5):
+            try:
+                with urlopen(req) as res:
+                    response_data = json.loads(res.read().decode("utf-8"))
+                    return response_data["choices"][0]["message"]["content"]
+            except HTTPError as e:
+                msg = e.read().decode("utf-8")
+                print(f"HTTP Error {e.code}: {msg}", file=sys.stderr)
+            except URLError as e:
+                print(f"URL Error: {e.reason}", file=sys.stderr)
+            except (json.JSONDecodeError, KeyError, IndexError) as e:
+                print(f"Failed to parse response: {e}", file=sys.stderr)
+
+            if attempt < 4:
+                print(f"Retrying ({attempt + 1}/5)...", file=sys.stderr)
+                sleep(1.0)
+
+        raise RuntimeError("Failed to get response from model after 5 tries.")
+
+    return invoke
 
 
 def parse_translation_response(
@@ -368,8 +394,7 @@ def validate_indices(
 def translate_batch(
     texts: List[str],
     target_language: str,
-    model: str,
-    api_key: str,
+    invoke: Callable[[str], str],
     context_entries: Optional[List[Tuple[str, str]]] = None
 ) -> List[str]:
     """
@@ -378,8 +403,7 @@ def translate_batch(
     Args:
         texts: List of subtitle text contents
         target_language: Target language name
-        model: Model identifier
-        api_key: OpenRouter API key
+        invoke: Function that takes a prompt and returns model response
         context_entries: Optional list of (original, translated) tuples
                         from previous batch for context
 
@@ -412,7 +436,7 @@ def translate_batch(
 
     for attempt in range(MAX_TRANSLATE_RETRIES):
         # Get translation
-        response = invoke_model(model, prompt, api_key)
+        response = invoke(prompt)
 
         try:
             # Parse response with indices
@@ -463,12 +487,28 @@ def translate_batch(
 def build_arg_parser() -> argparse.ArgumentParser:
     """Create and return the CLI argument parser."""
     parser = argparse.ArgumentParser(
-        description="Translate SRT subtitles using LLMs via OpenRouter API",
+        description="Translate SRT subtitles using LLMs via OpenRouter or Z.AI",
         epilog=(
             "Examples:\n"
-            "  cat input.srt | sublator.py --lang Spanish > output.srt\n"
-            "  sublator.py --video movie.mkv --lang Spanish > output.srt"
+            "  cat input.srt | sublator.py --openrouter --lang Spanish "
+            "> output.srt\n"
+            "  sublator.py --zai --video movie.mkv --lang Spanish > output.srt"
         )
+    )
+    provider_group = parser.add_mutually_exclusive_group(required=True)
+    provider_group.add_argument(
+        "--openrouter",
+        action="store_const",
+        dest="provider",
+        const="openrouter",
+        help="Use OpenRouter API (requires OPENROUTER_API_KEY env var)",
+    )
+    provider_group.add_argument(
+        "--zai",
+        action="store_const",
+        dest="provider",
+        const="zai",
+        help="Use Z.AI API (requires ZAI_API_KEY env var)",
     )
     parser.add_argument(
         "-l", "--lang",
@@ -477,8 +517,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-m", "--model",
-        default=DEFAULT_MODEL,
-        help=f"LLM model to use (default: {DEFAULT_MODEL})",
+        default=None,
+        help="LLM model to use (default: provider-specific)",
     )
     parser.add_argument(
         "--batch-size",
@@ -541,9 +581,14 @@ def main():  # pylint: disable=too-many-locals
         sys.exit(0)
 
     # If --video and --stream-index are provided, --lang is required
-    if args.video is not None and args.track_index is not None and args.lang is None:
+    if (
+        args.video is not None
+        and args.track_index is not None
+        and args.lang is None
+    ):
         print(
-            "Error: --lang is required when extracting and translating subtitles",
+            "Error: --lang is required when extracting and "
+            "translating subtitles",
             file=sys.stderr
         )
         sys.exit(1)
@@ -562,14 +607,26 @@ def main():  # pylint: disable=too-many-locals
         else args.batch_size
     )
 
+    # Get provider configuration
+    provider_config = PROVIDER_CONFIGS[args.provider]
+    env_key = provider_config["env_key"]
+    base_url = provider_config["base_url"]
+    default_model = provider_config["default_model"]
+
+    # Use provided model or provider's default
+    model = args.model if args.model else default_model
+
     # Check for API key
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    api_key = os.getenv(env_key)
     if not api_key:
         print(
-            "Error: OPENROUTER_API_KEY environment variable is not set",
+            f"Error: {env_key} environment variable is not set",
             file=sys.stderr
         )
         sys.exit(1)
+
+    # Create invoke function
+    invoke = make_invoke_model(model, api_key, base_url)
 
     # Read SRT content from video file or stdin
     if args.video:
@@ -628,7 +685,7 @@ def main():  # pylint: disable=too-many-locals
         # Translate batch with context
         try:
             translations = translate_batch(
-                texts, args.lang, args.model, api_key, context_entries
+                texts, args.lang, invoke, context_entries
             )
         except RuntimeError as e:
             print(f"Error translating batch: {e}", file=sys.stderr)

@@ -5,7 +5,9 @@ This module contains comprehensive tests for SRT parsing, formatting,
 translation, and API interaction functionality.
 """
 
+import io
 import json
+import subprocess
 import sys
 from unittest.mock import patch, Mock, MagicMock
 from urllib.error import URLError
@@ -22,6 +24,7 @@ from sublator import (
     parse_translation_response,
     validate_indices,
     extract_subtitles_from_video,
+    list_subtitle_streams,
     PROVIDER_CONFIGS,
 )
 
@@ -177,7 +180,10 @@ def test_format_empty_list():
 
 def test_parse_translation_response_success():
     """Test parsing valid response with indices."""
-    response = "1\nTranslated one\n---\n2\nTranslated two\n---\n3\nTranslated three"
+    response = (
+        "1\nTranslated one\n---\n2\nTranslated two\n---\n"
+        "3\nTranslated three"
+    )
     parsed = parse_translation_response(response, 3)
 
     assert len(parsed) == 3
@@ -297,7 +303,9 @@ def test_validate_indices_missing_multiple():
 
 def test_translate_batch_success():
     """Test successful batch translation."""
-    mock_invoke = Mock(return_value="1\nSpanish 1\n---\n2\nSpanish 2\n---\n3\nSpanish 3")
+    mock_invoke = Mock(
+        return_value="1\nSpanish 1\n---\n2\nSpanish 2\n---\n3\nSpanish 3"
+    )
 
     texts = ["English 1", "English 2", "English 3"]
     translations = translate_batch(texts, "Spanish", mock_invoke)
@@ -317,10 +325,12 @@ def test_translate_batch_success():
 def test_translate_batch_index_mismatch(mock_sleep):
     """Test handling of index mismatch in translations."""
     # Mock returns missing index first, then correct indices on retry
-    mock_invoke = Mock(side_effect=[
-        "1\nSpanish 1\n---\n3\nSpanish 3",  # Missing index 2
-        "1\nSpanish 1\n---\n2\nSpanish 2\n---\n3\nSpanish 3"  # Correct
-    ])
+    mock_invoke = Mock(
+        side_effect=[
+            "1\nSpanish 1\n---\n3\nSpanish 3",  # Missing index 2
+            "1\nSpanish 1\n---\n2\nSpanish 2\n---\n3\nSpanish 3"  # Correct
+        ]
+    )
 
     texts = ["English 1", "English 2", "English 3"]
 
@@ -364,7 +374,8 @@ def test_translate_batch_includes_context():
 @patch("sublator.sleep")
 def test_translate_batch_max_retries_exceeded(mock_sleep):
     """Test that translate_batch raises after max retries on index mismatch."""
-    mock_invoke = Mock(return_value="1\nOnly one translation")  # Missing index 2
+    # Missing index 2
+    mock_invoke = Mock(return_value="1\nOnly one translation")
 
     texts = ["English 1", "English 2"]
 
@@ -400,7 +411,9 @@ def test_make_invoke_model_success(mock_urlopen):
 
     mock_urlopen.return_value = mock_response
 
-    invoke = make_invoke_model("test-model", "test-key", "https://api.example.com/v1/chat")
+    invoke = make_invoke_model(
+        "test-model", "test-key", "https://api.example.com/v1/chat"
+    )
     result = invoke("Test prompt")
 
     assert result == "Translated text"
@@ -424,7 +437,9 @@ def test_make_invoke_model_retry_on_error(mock_sleep, mock_urlopen):
         )
     ]
 
-    invoke = make_invoke_model("test-model", "test-key", "https://api.example.com/v1/chat")
+    invoke = make_invoke_model(
+        "test-model", "test-key", "https://api.example.com/v1/chat"
+    )
     result = invoke("Test prompt")
 
     assert result == "Success"
@@ -438,7 +453,9 @@ def test_make_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
     """Test that RuntimeError is raised after max retries."""
     mock_urlopen.side_effect = URLError("Connection error")
 
-    invoke = make_invoke_model("test-model", "test-key", "https://api.example.com/v1/chat")
+    invoke = make_invoke_model(
+        "test-model", "test-key", "https://api.example.com/v1/chat"
+    )
 
     with pytest.raises(
         RuntimeError,
@@ -455,7 +472,6 @@ def test_make_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
 def test_provider_required():
     """Test that provider argument is required."""
     parser = build_arg_parser()
-    import argparse
 
     with pytest.raises(SystemExit):
         parser.parse_args(["--lang", "Spanish"])
@@ -520,7 +536,10 @@ def test_provider_configs():
     assert PROVIDER_CONFIGS["openrouter"]["env_key"] == "OPENROUTER_API_KEY"
     assert PROVIDER_CONFIGS["zai"]["env_key"] == "ZAI_API_KEY"
 
-    assert PROVIDER_CONFIGS["openrouter"]["default_model"] == "google/gemini-2.5-flash-preview-09-2025"
+    assert (
+        PROVIDER_CONFIGS["openrouter"]["default_model"]
+        == "google/gemini-2.5-flash-preview-09-2025"
+    )
     assert PROVIDER_CONFIGS["zai"]["default_model"] == "GLM-5"
 
 
@@ -758,8 +777,6 @@ def test_extract_subtitles_ffmpeg_not_found(mock_run, mock_exists):
 @patch("sublator.subprocess.run")
 def test_extract_subtitles_ffmpeg_fails(mock_run, mock_exists):
     """Test RuntimeError when ffmpeg extraction fails."""
-    import subprocess
-
     mock_exists.return_value = True
 
     # Mock version check succeeds
@@ -786,8 +803,6 @@ def test_extract_subtitles_ffmpeg_fails(mock_run, mock_exists):
 @patch("sublator.subprocess.run")
 def test_extract_subtitles_no_subtitle_stream(mock_run, mock_exists):
     """Test handling of video with no subtitle streams."""
-    import subprocess
-
     mock_exists.return_value = True
 
     mock_version_result = Mock()
@@ -841,16 +856,14 @@ def test_stream_index_without_video():
     ])
 
     assert args.video is None
-    assert args.track_index == 3  # Parsing succeeds, validation happens in main()
+    # Parsing succeeds, validation happens in main()
+    assert args.track_index == 3
 
 
 @patch("sublator.os.path.exists")
 @patch("sublator.subprocess.run")
 def test_list_subtitle_streams_success(mock_run, mock_exists, capsys):
     """Test successful listing of subtitle streams."""
-    import json
-    from sublator import list_subtitle_streams
-
     mock_exists.return_value = True
 
     # Mock ffprobe version check
@@ -910,9 +923,6 @@ def test_list_subtitle_streams_success(mock_run, mock_exists, capsys):
 @patch("sublator.subprocess.run")
 def test_list_subtitle_streams_no_subtitles(mock_run, mock_exists, capsys):
     """Test listing streams when video has no subtitles."""
-    import json
-    from sublator import list_subtitle_streams
-
     mock_exists.return_value = True
 
     mock_version_result = Mock()
@@ -948,24 +958,20 @@ def test_list_subtitle_streams_no_subtitles(mock_run, mock_exists, capsys):
 
 
 @patch("sublator.os.path.exists")
-def test_list_subtitle_streams_file_not_found(mock_exists, capsys):
+def test_list_subtitle_streams_file_not_found(mock_exists):
     """Test FileNotFoundError when video file doesn't exist."""
-    from sublator import list_subtitle_streams
-
     mock_exists.return_value = False
 
     with pytest.raises(FileNotFoundError, match="Video file not found"):
         list_subtitle_streams("nonexistent.mkv")
 
 
-@patch("sublator.sys.exit")
-def test_stream_index_requires_video(mock_exit):
+def test_stream_index_requires_video():
     """Test that --stream-index requires --video."""
-    from sublator import build_arg_parser
-    import io
-
     parser = build_arg_parser()
-    args = parser.parse_args(["--openrouter", "--lang", "Spanish", "--stream-index", "1"])
+    args = parser.parse_args(
+        ["--openrouter", "--lang", "Spanish", "--stream-index", "1"]
+    )
 
     # Mock sys.stderr to capture error output
     old_stderr = sys.stderr

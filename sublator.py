@@ -11,6 +11,7 @@ import os
 import json
 import argparse
 import subprocess
+from collections import Counter
 from urllib.request import urlopen, Request, HTTPError, URLError
 from time import sleep
 from typing import List, Tuple, Optional, Callable
@@ -142,7 +143,6 @@ def list_subtitle_streams(video_path: str) -> None:
 
     # Parse JSON output
     try:
-        import json
         data = json.loads(result.stdout)
         streams = data.get("streams", [])
     except json.JSONDecodeError as e:
@@ -300,7 +300,7 @@ def make_invoke_model(
 
 def parse_translation_response(
     response: str,
-    expected_count: int
+    expected_count: int  # pylint: disable=unused-argument
 ) -> List[Tuple[int, str]]:
     """
     Parse model response into (index, translated_text) pairs.
@@ -383,7 +383,6 @@ def validate_indices(
 
     # Check for duplicates in response
     if len(response_indices) != len(response_set):
-        from collections import Counter
         counts = Counter(response_indices)
         duplicates = [idx for idx, count in counts.items() if count > 1]
         return False, f"Duplicate indices in response: {sorted(duplicates)}"
@@ -391,7 +390,7 @@ def validate_indices(
     return True, ""
 
 
-def translate_batch(
+def translate_batch(  # pylint: disable=too-many-locals
     texts: List[str],
     target_language: str,
     invoke: Callable[[str], str],
@@ -558,7 +557,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main():  # pylint: disable=too-many-locals
+def main():  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Main entry point for the sublator script."""
     parser = build_arg_parser()
     args = parser.parse_args()

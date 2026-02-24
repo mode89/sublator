@@ -6,6 +6,7 @@ This module provides functionality to translate subtitle files in SRT format
 using language models accessed through the OpenRouter API.
 """
 
+import re
 import sys
 import os
 import json
@@ -24,14 +25,147 @@ PROVIDER_CONFIGS = {
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1/chat/completions",
         "env_key": "OPENROUTER_API_KEY",
-        "default_model": "google/gemini-2.5-flash-preview-09-2025",
+        "default_model": "google/gemini-2.5-flash",
     },
     "zai": {
         "base_url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
         "env_key": "ZAI_API_KEY",
         "default_model": "GLM-5",
     },
+    "gemini": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta",
+        "env_key": "GEMINI_API_KEY",
+        "default_model": "gemma-3-27b-it",
+    },
+    "minimax": {
+        "base_url": "https://api.minimax.io/v1/chat/completions",
+        "env_key": "MINIMAX_API_KEY",
+        "default_model": "MiniMax-M2.5",
+    },
 }
+
+
+def openai_call(
+    model: str,
+    api_key: str,
+    base_url: str,
+    prompt: str
+) -> str:
+    """Make an OpenAI-compatible API call."""
+    req = Request(
+        url=base_url,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        data=json.dumps({
+            "model": model,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+        }).encode("utf-8"),
+    )
+
+    with urlopen(req) as res:
+        response_data = json.loads(res.read().decode("utf-8"))
+        return response_data["choices"][0]["message"]["content"]
+
+
+def gemini_call(
+    model: str,
+    api_key: str,
+    base_url: str,
+    prompt: str
+) -> str:
+    """Make a Gemini API call."""
+    url = f"{base_url}/models/{model}:generateContent"
+    req = Request(
+        url=url,
+        method="POST",
+        headers={
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json",
+        },
+        data=json.dumps({
+            "contents": [
+                {"parts": [{"text": prompt}]}
+            ],
+        }).encode("utf-8"),
+    )
+
+    with urlopen(req) as res:
+        response_data = json.loads(res.read().decode("utf-8"))
+        return response_data["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def minimax_call(
+    model: str,
+    api_key: str,
+    base_url: str,
+    prompt: str
+) -> str:
+    """Make a MiniMax API call, stripping any <think> reasoning tags."""
+    content = openai_call(model, api_key, base_url, prompt)
+    return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+
+def make_invoke_model(
+    provider: str, model: str, api_key: str, base_url: str
+) -> Callable[[str], str]:
+    """
+    Create an invoke function with captured model, API key, and base URL.
+
+    Args:
+        provider: Provider name (e.g., "gemini", "openrouter", "zai")
+        model: Model identifier
+        api_key: API key for the provider
+        base_url: API endpoint URL
+
+    Returns:
+        A function that takes a prompt and returns the model response.
+    """
+    def invoke(prompt: str) -> str:
+        """
+        Invoke API to get model response.
+
+        Args:
+            prompt: User prompt
+
+        Returns:
+            Model response content
+
+        Raises:
+            RuntimeError: If all retry attempts fail
+        """
+        for attempt in range(MAX_TRANSLATE_RETRIES):
+            try:
+                if provider == "gemini":
+                    return gemini_call(model, api_key, base_url, prompt)
+                if provider == "minimax":
+                    return minimax_call(model, api_key, base_url, prompt)
+                return openai_call(model, api_key, base_url, prompt)
+            except HTTPError as e:
+                msg = e.read().decode("utf-8")
+                print(f"HTTP Error {e.code}: {msg}", file=sys.stderr)
+            except URLError as e:
+                print(f"URL Error: {e.reason}", file=sys.stderr)
+            except (json.JSONDecodeError, KeyError, IndexError) as e:
+                print(f"Failed to parse response: {e}", file=sys.stderr)
+
+            if attempt < MAX_TRANSLATE_RETRIES - 1:
+                print(
+                    f"Retrying ({attempt + 1}/{MAX_TRANSLATE_RETRIES})...",
+                    file=sys.stderr
+                )
+                sleep(1.0)
+
+        raise RuntimeError(
+            f"Failed to get response from model after "
+            f"{MAX_TRANSLATE_RETRIES} tries."
+        )
+
+    return invoke
 
 
 def extract_subtitles_from_video(
@@ -234,70 +368,6 @@ def format_srt(entries: List[Tuple[str, str, str]]) -> str:
     return output
 
 
-def make_invoke_model(
-    model: str, api_key: str, base_url: str
-) -> Callable[[str], str]:
-    """
-    Create an invoke function with captured model, API key, and base URL.
-
-    Args:
-        model: Model identifier
-        api_key: API key for the provider
-        base_url: API endpoint URL
-
-    Returns:
-        A function that takes a prompt and returns the model response.
-    """
-    def invoke(prompt: str) -> str:
-        """
-        Invoke API to get model response.
-
-        Args:
-            prompt: User prompt
-
-        Returns:
-            Model response content
-
-        Raises:
-            RuntimeError: If all retry attempts fail
-        """
-        req = Request(
-            url=base_url,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps({
-                "model": model,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-            }).encode("utf-8"),
-        )
-
-        for attempt in range(5):
-            try:
-                with urlopen(req) as res:
-                    response_data = json.loads(res.read().decode("utf-8"))
-                    return response_data["choices"][0]["message"]["content"]
-            except HTTPError as e:
-                msg = e.read().decode("utf-8")
-                print(f"HTTP Error {e.code}: {msg}", file=sys.stderr)
-            except URLError as e:
-                print(f"URL Error: {e.reason}", file=sys.stderr)
-            except (json.JSONDecodeError, KeyError, IndexError) as e:
-                print(f"Failed to parse response: {e}", file=sys.stderr)
-
-            if attempt < 4:
-                print(f"Retrying ({attempt + 1}/5)...", file=sys.stderr)
-                sleep(1.0)
-
-        raise RuntimeError("Failed to get response from model after 5 tries.")
-
-    return invoke
-
-
 def parse_translation_response(
     response: str,
     expected_count: int  # pylint: disable=unused-argument
@@ -486,10 +556,13 @@ def translate_batch(  # pylint: disable=too-many-locals
 def build_arg_parser() -> argparse.ArgumentParser:
     """Create and return the CLI argument parser."""
     parser = argparse.ArgumentParser(
-        description="Translate SRT subtitles using LLMs via OpenRouter or Z.AI",
+        description=(
+            "Translate SRT subtitles using LLMs via "
+            "Gemini, OpenRouter, Z.AI or MiniMax"
+        ),
         epilog=(
             "Examples:\n"
-            "  cat input.srt | sublator.py --openrouter --lang Spanish "
+            "  cat input.srt | sublator.py --gemini --lang Spanish "
             "> output.srt\n"
             "  sublator.py --zai --video movie.mkv --lang Spanish > output.srt"
         )
@@ -508,6 +581,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         dest="provider",
         const="zai",
         help="Use Z.AI API (requires ZAI_API_KEY env var)",
+    )
+    provider_group.add_argument(
+        "--gemini",
+        action="store_const",
+        dest="provider",
+        const="gemini",
+        help="Use Gemini API (requires GEMINI_API_KEY env var)",
+    )
+    provider_group.add_argument(
+        "--minimax",
+        action="store_const",
+        dest="provider",
+        const="minimax",
+        help="Use MiniMax API (requires MINIMAX_API_KEY env var)",
     )
     parser.add_argument(
         "-l", "--lang",
@@ -625,7 +712,7 @@ def main():  # pylint: disable=too-many-locals,too-many-branches,too-many-statem
         sys.exit(1)
 
     # Create invoke function
-    invoke = make_invoke_model(model, api_key, base_url)
+    invoke = make_invoke_model(args.provider, model, api_key, base_url)
 
     # Read SRT content from video file or stdin
     if args.video:

@@ -4,7 +4,7 @@ Translate SRT subtitle files using LLMs via OpenRouter or Z.AI API.
 
 ## Features
 
-- Multiple API providers (OpenRouter and Z.AI)
+- Multiple API providers (Gemini, OpenRouter and Z.AI)
 - Batch translation for efficiency (100 subtitles per batch)
 - Context-aware translation (includes previous translations for consistency)
 - Support for any language
@@ -17,12 +17,17 @@ Translate SRT subtitle files using LLMs via OpenRouter or Z.AI API.
 ## Requirements
 
 - Python 3.6+
-- API key for your chosen provider (OpenRouter or Z.AI)
+- API key for your chosen provider (Gemini, OpenRouter or Z.AI)
 - ffmpeg/ffprobe (required for --video option)
 
 ## Setup
 
 Set the API key for your chosen provider:
+
+**Gemini:**
+```bash
+export GEMINI_API_KEY="your-gemini-api-key"
+```
 
 **OpenRouter:**
 ```bash
@@ -43,6 +48,7 @@ cat input.srt | ./sublator.py --openrouter --lang Spanish > output.srt
 ### Provider Selection (required)
 
 You must specify one of:
+- `--gemini`: Use Gemini API (requires `GEMINI_API_KEY`)
 - `--openrouter`: Use OpenRouter API (requires `OPENROUTER_API_KEY`)
 - `--zai`: Use Z.AI API (requires `ZAI_API_KEY`)
 
@@ -50,7 +56,8 @@ You must specify one of:
 
 - `-l, --lang` (required for translation): Target language
 - `-m, --model` (optional): LLM model (default: provider-specific)
-  - OpenRouter: `google/gemini-2.5-flash-preview-09-2025`
+  - Gemini: `gemma-3-27b-it`
+  - OpenRouter: `google/gemini-2.5-flash`
   - Z.AI: `GLM-5`
 - `--batch-size` (optional): Subtitles per batch (default: 100)
 - `--context-size` (optional): Number of previous translations to include as context (default: batch size)

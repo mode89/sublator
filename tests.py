@@ -20,6 +20,7 @@ from sublator import (
     format_srt,
     translate_batch,
     make_invoke_model,
+    minimax_call,
     build_arg_parser,
     parse_translation_response,
     validate_indices,
@@ -393,8 +394,8 @@ def test_translate_batch_max_retries_exceeded(mock_sleep):
 # API Invocation Tests
 
 @patch("sublator.urlopen")
-def test_make_invoke_model_success(mock_urlopen):
-    """Test successful API invocation via make_invoke_model."""
+def test_make_invoke_model_openai_success(mock_urlopen):
+    """Test successful OpenAI-compatible API call via make_invoke_model."""
     # Mock successful response
     mock_response = MagicMock()
     mock_response.read.return_value = json.dumps({
@@ -412,12 +413,55 @@ def test_make_invoke_model_success(mock_urlopen):
     mock_urlopen.return_value = mock_response
 
     invoke = make_invoke_model(
-        "test-model", "test-key", "https://api.example.com/v1/chat"
+        "openrouter",
+        "test-model",
+        "test-key",
+        "https://api.example.com/v1/chat"
     )
     result = invoke("Test prompt")
 
     assert result == "Translated text"
     mock_urlopen.assert_called_once()
+    # Verify OpenAI call format (Bearer token)
+    req = mock_urlopen.call_args[0][0]
+    assert req.get_header("Authorization") == "Bearer test-key"
+
+
+@patch("sublator.urlopen")
+def test_make_invoke_model_gemini_success(mock_urlopen):
+    """Test successful Gemini API call via make_invoke_model."""
+    # Mock successful response
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps({
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {"text": "Translated via Gemini"}
+                    ]
+                }
+            }
+        ]
+    }).encode("utf-8")
+    mock_response.__enter__ = Mock(return_value=mock_response)
+    mock_response.__exit__ = Mock(return_value=False)
+
+    mock_urlopen.return_value = mock_response
+
+    invoke = make_invoke_model(
+        "gemini",
+        "gemini-test",
+        "gemini-key",
+        "https://generativelanguage.googleapis.com/v1beta"
+    )
+    result = invoke("Test prompt")
+
+    assert result == "Translated via Gemini"
+    mock_urlopen.assert_called_once()
+    # Verify Gemini call format (x-goog-api-key token)
+    req = mock_urlopen.call_args[0][0]
+    assert req.get_header("X-goog-api-key") == "gemini-key"
+    assert "models/gemini-test:generateContent" in req.full_url
 
 
 @patch("sublator.urlopen")
@@ -438,7 +482,10 @@ def test_make_invoke_model_retry_on_error(mock_sleep, mock_urlopen):
     ]
 
     invoke = make_invoke_model(
-        "test-model", "test-key", "https://api.example.com/v1/chat"
+        "openrouter",
+        "test-model",
+        "test-key",
+        "https://api.example.com/v1/chat"
     )
     result = invoke("Test prompt")
 
@@ -454,7 +501,10 @@ def test_make_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
     mock_urlopen.side_effect = URLError("Connection error")
 
     invoke = make_invoke_model(
-        "test-model", "test-key", "https://api.example.com/v1/chat"
+        "openrouter",
+        "test-model",
+        "test-key",
+        "https://api.example.com/v1/chat"
     )
 
     with pytest.raises(
@@ -465,6 +515,84 @@ def test_make_invoke_model_max_retries_exceeded(mock_sleep, mock_urlopen):
 
     assert mock_urlopen.call_count == 5
     assert mock_sleep.call_count == 4  # Slept 4 times (not after last attempt)
+
+
+
+@patch("sublator.urlopen")
+def test_minimax_call_strips_think_tags(mock_urlopen):
+    """Test that minimax_call strips <think> reasoning blocks from response."""
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps({
+        "choices": [
+            {"message": {"content": "<think>\nreasoning here\n</think>\nActual answer"}}
+        ]
+    }).encode("utf-8")
+    mock_response.__enter__ = Mock(return_value=mock_response)
+    mock_response.__exit__ = Mock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = minimax_call("MiniMax-M2.5", "test-key", "https://api.minimax.io/v1/chat/completions", "prompt")
+
+    assert result == "Actual answer"
+    assert "<think>" not in result
+
+
+@patch("sublator.urlopen")
+def test_minimax_call_strips_multiline_think_tags(mock_urlopen):
+    """Test that minimax_call strips multiline <think> blocks."""
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps({
+        "choices": [
+            {"message": {"content": "<think>\nline 1\nline 2\nline 3\n</think>\nTranslation result"}}
+        ]
+    }).encode("utf-8")
+    mock_response.__enter__ = Mock(return_value=mock_response)
+    mock_response.__exit__ = Mock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = minimax_call("MiniMax-M2.5", "test-key", "https://api.minimax.io/v1/chat/completions", "prompt")
+
+    assert result == "Translation result"
+
+
+@patch("sublator.urlopen")
+def test_minimax_call_no_think_tags(mock_urlopen):
+    """Test that minimax_call works normally when no <think> tags are present."""
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps({
+        "choices": [
+            {"message": {"content": "Plain response without think tags"}}
+        ]
+    }).encode("utf-8")
+    mock_response.__enter__ = Mock(return_value=mock_response)
+    mock_response.__exit__ = Mock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = minimax_call("MiniMax-M2.5", "test-key", "https://api.minimax.io/v1/chat/completions", "prompt")
+
+    assert result == "Plain response without think tags"
+
+
+@patch("sublator.urlopen")
+def test_make_invoke_model_minimax_strips_think(mock_urlopen):
+    """Test that make_invoke_model with minimax strips <think> tags."""
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps({
+        "choices": [
+            {"message": {"content": "<think>reasoning</think>\nTranslated text"}}
+        ]
+    }).encode("utf-8")
+    mock_response.__enter__ = Mock(return_value=mock_response)
+    mock_response.__exit__ = Mock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    invoke = make_invoke_model(
+        "minimax", "MiniMax-M2.5", "test-key", "https://api.minimax.io/v1/chat/completions"
+    )
+    result = invoke("Test prompt")
+
+    assert result == "Translated text"
+    assert "<think>" not in result
 
 
 # Command-Line Interface Tests
@@ -495,12 +623,39 @@ def test_zai_provider():
     assert args.lang == "Spanish"
 
 
+def test_gemini_provider():
+    """Test --gemini flag sets provider correctly."""
+    parser = build_arg_parser()
+    args = parser.parse_args(["--gemini", "--lang", "Spanish"])
+
+    assert args.provider == "gemini"
+    assert args.lang == "Spanish"
+
+
+def test_minimax_provider():
+    """Test --minimax flag sets provider correctly."""
+    parser = build_arg_parser()
+    args = parser.parse_args(["--minimax", "--lang", "Spanish"])
+
+    assert args.provider == "minimax"
+    assert args.lang == "Spanish"
+
+
 def test_provider_mutually_exclusive():
-    """Test that --openrouter and --zai are mutually exclusive."""
+    """Test that provider flags are mutually exclusive."""
     parser = build_arg_parser()
 
     with pytest.raises(SystemExit):
         parser.parse_args(["--openrouter", "--zai", "--lang", "Spanish"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--gemini", "--zai", "--lang", "Spanish"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--gemini", "--openrouter", "--lang", "Spanish"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--minimax", "--openrouter", "--lang", "Spanish"])
 
 
 def test_default_model_is_none():
@@ -532,15 +687,21 @@ def test_provider_configs():
     """Test that provider configs are properly defined."""
     assert "openrouter" in PROVIDER_CONFIGS
     assert "zai" in PROVIDER_CONFIGS
+    assert "gemini" in PROVIDER_CONFIGS
+    assert "minimax" in PROVIDER_CONFIGS
 
     assert PROVIDER_CONFIGS["openrouter"]["env_key"] == "OPENROUTER_API_KEY"
     assert PROVIDER_CONFIGS["zai"]["env_key"] == "ZAI_API_KEY"
+    assert PROVIDER_CONFIGS["gemini"]["env_key"] == "GEMINI_API_KEY"
+    assert PROVIDER_CONFIGS["minimax"]["env_key"] == "MINIMAX_API_KEY"
 
     assert (
         PROVIDER_CONFIGS["openrouter"]["default_model"]
-        == "google/gemini-2.5-flash-preview-09-2025"
+        == "google/gemini-2.5-flash"
     )
     assert PROVIDER_CONFIGS["zai"]["default_model"] == "GLM-5"
+    assert PROVIDER_CONFIGS["gemini"]["default_model"] == "gemma-3-27b-it"
+    assert PROVIDER_CONFIGS["minimax"]["default_model"] == "MiniMax-M2.5"
 
 
 # Round-Trip Tests

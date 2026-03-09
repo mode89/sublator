@@ -464,8 +464,8 @@ def test_default_model():
     parser = build_arg_parser()
     args = parser.parse_args(["--lang", "Spanish"])
 
-    assert args.model == "google/gemini-2.5-flash-preview-09-2025"
-    assert args.batch_size == 50
+    assert args.model == "google/gemini-2.5-flash"
+    assert args.batch_size == 100
 
 
 def test_custom_model_and_batch_size():

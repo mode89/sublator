@@ -18,7 +18,7 @@ from typing import List, Tuple, Optional
 
 MAX_TRANSLATE_RETRIES = 5
 DEFAULT_BATCH_SIZE = 100
-DEFAULT_MODEL = "google/gemini-2.5-flash-lite-preview-09-2025"
+DEFAULT_MODEL = "google/gemini-2.5-flash"
 
 
 def extract_subtitles_from_video(
